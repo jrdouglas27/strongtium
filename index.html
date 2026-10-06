@@ -7,6 +7,34 @@
 </head>
 <body>
     <h1>Life Tracker</h1>
-    <p>It's alive.</p>
+    <p id="status">Connecting to Supabase...</p>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <script>
+        const SUPABASE_URL = "https://sdrlhybxmpotqgnnewvk.supabase.co";
+        const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_--1kE1Vjc7PVJ9o8Njf9tw_BVHnAVtq";
+
+        const supabaseClient = window.supabase.createClient(
+            SUPABASE_URL,
+            SUPABASE_PUBLISHABLE_KEY
+        );
+
+        async function testSupabase() {
+            const { data, error } = await supabaseClient.auth.getSession();
+
+            if (error) {
+                document.getElementById("status").textContent =
+                    "Supabase error: " + error.message;
+                return;
+            }
+
+            document.getElementById("status").textContent =
+                "Supabase connection successful!";
+        }
+
+testSupabase();
+
+    </script>
 </body>
 </html>
