@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Plus, Trash2, Dumbbell, Save } from 'lucide-react';
 import { useWorkout } from '../context/WorkoutContext';
+import { MUSCLE_GROUPS } from '../types/workout';
 
 interface RoutineEditorModalProps {
   onClose: () => void;
@@ -164,6 +165,18 @@ export const RoutineEditorModal: React.FC<RoutineEditorModalProps> = ({ onClose 
                     onChange={(e) => handleUpdateExercise(idx, 'name', e.target.value)}
                     className="flex-1 bg-[#3d5a6c] border border-[#3f5d70] rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-[#94a3b8] focus:outline-none focus:border-[#8bb4cb]"
                   />
+
+                  <select
+                    value={ex.muscle}
+                    onChange={(e) => handleUpdateExercise(idx, 'muscle', e.target.value)}
+                    className="w-28 bg-[#3d5a6c] border border-[#3f5d70] rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none"
+                  >
+                    {MUSCLE_GROUPS.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
 
                   <input
                     type="number"

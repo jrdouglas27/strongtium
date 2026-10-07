@@ -89,3 +89,43 @@ export interface RoutineDueStatus {
   badgeText: string;
   badgeColor: 'red' | 'amber' | 'green' | 'blue' | 'gray';
 }
+
+export interface LogExercisePayload {
+  exerciseId?: string;
+  exerciseName: string;
+  targetMuscleGroup?: string;
+  routineId?: string;
+  routineName?: string;
+  exerciseNotes?: string;
+  sets: {
+    setNumber: number;
+    weight: number;
+    reps: number;
+  }[];
+  loggedAt?: string;
+}
+
+export const MUSCLE_GROUPS = [
+  'Chest',
+  'Back',
+  'Shoulders',
+  'Biceps',
+  'Triceps',
+  'Forearms',
+  'Hands / Wrists',
+  'Quads',
+  'Hamstrings',
+  'Glutes',
+  'Calves',
+  'Shins (Tibialis)',
+  'Feet / Ankles',
+  'Core / Abs',
+  'Neck / Traps',
+  'Hips / Adductors',
+  'Full Body',
+  'General',
+] as const;
+
+export type MuscleGroup = (typeof MUSCLE_GROUPS)[number];
+
+

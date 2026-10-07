@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Calendar, Dumbbell, Clock, Flame, ChevronRight } from 'lucide-react';
+import { Calendar, Dumbbell, Clock, Flame, ChevronRight } from 'lucide-react';
 import { Routine } from '../types/workout';
 import { calculateRoutineDueStatus, formatRelativeDays } from '../lib/calculations';
 
@@ -110,8 +110,8 @@ export const RoutineCard: React.FC<RoutineCardProps> = ({ routine, onStart, onEd
               : 'bg-[#2d4554] hover:bg-[#253946] text-[#f1f5f9] border border-[#3f5d70]'
           }`}
         >
-          <Play className="w-3.5 h-3.5 fill-current" />
-          <span>Start Workout</span>
+          <Dumbbell className="w-3.5 h-3.5" />
+          <span>Focus on Exercises</span>
         </button>
 
         {onEdit && (

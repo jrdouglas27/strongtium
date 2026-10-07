@@ -6,51 +6,50 @@ import {
   WorkoutSession,
   PersonalRecord,
   LastExercisePerformance,
+  LogExercisePayload,
 } from '../types/workout';
 import { calculate1RM } from '../lib/calculations';
 import { STARTER_ROUTINES } from '../lib/starterData';
+
+export interface ExerciseHistoryEntry {
+  sessionId: string;
+  sessionName: string;
+  completedAt: string;
+  notes?: string;
+  sets: { setNumber: number; weight: number; reps: number }[];
+  maxWeight: number;
+  bestEstimated1RM: number;
+  totalVolume: number;
+}
+
+export interface TodayActivitySummary {
+  exerciseName: string;
+  routineName?: string;
+  setsCount: number;
+  maxWeight: number;
+  totalVolume: number;
+  lastLoggedAt: string;
+}
 
 interface WorkoutContextType {
   routines: Routine[];
   sessions: WorkoutSession[];
   personalRecords: Record<string, PersonalRecord>;
   loading: boolean;
-  activeSession: ActiveSessionState | null;
-  startActiveSession: (routine?: Routine) => void;
-  cancelActiveSession: () => void;
-  saveCompletedSession: (sessionData: CompletedSessionInput) => Promise<void>;
-  createRoutine: (name: string, description: string, restDays: number, exercises: { name: string; muscle: string; targetSets: number }[]) => Promise<void>;
-  deleteRoutine: (routineId: string) => Promise<void>;
+  logExerciseSets: (payload: LogExercisePayload) => Promise<void>;
+  getExerciseHistory: (exerciseName: string) => ExerciseHistoryEntry[];
   getLastPerformance: (exerciseName: string) => LastExercisePerformance | null;
+  getTodayLoggedSetsCount: (exerciseName?: string) => number;
+  getTodayActivity: () => TodayActivitySummary[];
+  markRoutineCompleted: (routineId: string) => Promise<void>;
+  createRoutine: (name: string, description: string, restDays: number, exercises: { name: string; muscle: string; targetSets: number }[]) => Promise<void>;
+  updateRoutine: (routineId: string, name: string, description: string, restDays: number, exercises: { name: string; muscle: string; targetSets: number }[]) => Promise<void>;
+  addOrUpdateExerciseToRoutine: (routineId: string, exerciseName: string, muscle: string, targetSets: number) => Promise<void>;
+  removeExerciseFromRoutine: (routineId: string, exerciseIndex: number) => Promise<void>;
+  bulkSaveRoutines: (newRoutines: { name: string; description?: string; targetRestDays: number; exercises: { name: string; muscle: string; targetSets: number }[] }[]) => Promise<void>;
+  deleteRoutine: (routineId: string) => Promise<void>;
   loadStarterRoutines: () => Promise<void>;
   refreshData: () => Promise<void>;
-}
-
-export interface ActiveSessionState {
-  routineId?: string;
-  routineName: string;
-  startedAt: string;
-  exercises: {
-    exerciseId?: string;
-    name: string;
-    notes: string;
-    targetSets: number;
-    sets: { setNumber: number; weight: number; reps: number; isCompleted: boolean }[];
-  }[];
-}
-
-export interface CompletedSessionInput {
-  routineId?: string;
-  routineName: string;
-  startedAt: string;
-  completedAt: string;
-  sessionNotes: string;
-  exercises: {
-    exerciseId?: string;
-    exerciseName: string;
-    exerciseNotes: string;
-    sets: { setNumber: number; weight: number; reps: number }[];
-  }[];
 }
 
 const WorkoutContext = createContext<WorkoutContextType | undefined>(undefined);
@@ -64,7 +63,6 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [sessions, setSessions] = useState<WorkoutSession[]>([]);
   const [personalRecords, setPersonalRecords] = useState<Record<string, PersonalRecord>>({});
   const [loading, setLoading] = useState(true);
-  const [activeSession, setActiveSession] = useState<ActiveSessionState | null>(null);
 
   // Compute Personal Records from sessions
   const computePRs = useCallback((allSessions: WorkoutSession[]) => {
@@ -320,193 +318,326 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
     [sessions]
   );
 
-  // Start an active workout session
-  const startActiveSession = (routine?: Routine) => {
-    if (routine) {
-      const initialExercises = (routine.exercises || []).map((re) => {
-        const lastPerf = getLastPerformance(re.exercise?.name || '');
-        const targetSetsCount = re.target_sets || 3;
+  // Get full history for a specific exercise
+  const getExerciseHistory = useCallback(
+    (exerciseName: string): ExerciseHistoryEntry[] => {
+      const cleanName = exerciseName.trim().toLowerCase();
+      if (!cleanName) return [];
 
-        const defaultSets = Array.from({ length: targetSetsCount }, (_, i) => {
-          const lastSet = lastPerf?.sets[i] || lastPerf?.sets[lastPerf.sets.length - 1];
-          return {
-            setNumber: i + 1,
-            weight: lastSet ? lastSet.weight : 0,
-            reps: lastSet ? lastSet.reps : 0,
-            isCompleted: false,
-          };
+      const history: ExerciseHistoryEntry[] = [];
+
+      sessions.forEach((s) => {
+        if (!s.completed_at) return;
+        const match = s.logged_exercises?.find(
+          (le) => le.exercise_name.trim().toLowerCase() === cleanName
+        );
+
+        if (match && match.sets.length > 0) {
+          const sets = match.sets.map((st) => ({
+            setNumber: st.set_number,
+            weight: Number(st.weight),
+            reps: Number(st.reps),
+          }));
+          const maxW = Math.max(...sets.map((st) => st.weight));
+          const best1RM = Math.max(...sets.map((st) => calculate1RM(st.weight, st.reps)));
+          const totalVol = sets.reduce((sum, st) => sum + st.weight * st.reps, 0);
+
+          history.push({
+            sessionId: s.id,
+            sessionName: s.routine_name,
+            completedAt: s.completed_at,
+            notes: match.exercise_notes,
+            sets,
+            maxWeight: maxW,
+            bestEstimated1RM: best1RM,
+            totalVolume: totalVol,
+          });
+        }
+      });
+
+      return history;
+    },
+    [sessions]
+  );
+
+  // Get count of sets logged today (for a specific exercise or across all)
+  const getTodayLoggedSetsCount = useCallback(
+    (exerciseName?: string): number => {
+      const todayStr = new Date().toDateString();
+      const cleanName = exerciseName ? exerciseName.trim().toLowerCase() : null;
+      let count = 0;
+
+      sessions.forEach((s) => {
+        if (!s.completed_at) return;
+        if (new Date(s.completed_at).toDateString() !== todayStr) return;
+
+        s.logged_exercises?.forEach((le) => {
+          if (!cleanName || le.exercise_name.trim().toLowerCase() === cleanName) {
+            count += le.sets.length;
+          }
         });
-
-        return {
-          exerciseId: re.exercise_id,
-          name: re.exercise?.name || 'Exercise',
-          notes: '',
-          targetSets: targetSetsCount,
-          sets: defaultSets,
-        };
       });
 
-      setActiveSession({
-        routineId: routine.id,
-        routineName: routine.name,
-        startedAt: new Date().toISOString(),
-        exercises: initialExercises,
-      });
-    } else {
-      // Freeform workout
-      setActiveSession({
-        routineName: 'Custom Workout',
-        startedAt: new Date().toISOString(),
-        exercises: [],
-      });
-    }
-  };
+      return count;
+    },
+    [sessions]
+  );
 
-  const cancelActiveSession = () => {
-    setActiveSession(null);
-  };
+  // Get summary of today's logged activity
+  const getTodayActivity = useCallback((): TodayActivitySummary[] => {
+    const todayStr = new Date().toDateString();
+    const map: Record<string, TodayActivitySummary> = {};
 
-  // Save completed workout session
-  const saveCompletedSession = async (input: CompletedSessionInput) => {
-    setLoading(true);
+    sessions.forEach((s) => {
+      if (!s.completed_at) return;
+      if (new Date(s.completed_at).toDateString() !== todayStr) return;
+
+      s.logged_exercises?.forEach((le) => {
+        const name = le.exercise_name.trim();
+        if (!name) return;
+
+        const vol = le.sets.reduce((acc, st) => acc + Number(st.weight) * Number(st.reps), 0);
+        const maxW = Math.max(0, ...le.sets.map((st) => Number(st.weight)));
+
+        if (!map[name]) {
+          map[name] = {
+            exerciseName: name,
+            routineName: s.routine_name,
+            setsCount: le.sets.length,
+            maxWeight: maxW,
+            totalVolume: vol,
+            lastLoggedAt: s.completed_at!,
+          };
+        } else {
+          map[name].setsCount += le.sets.length;
+          map[name].totalVolume += vol;
+          map[name].maxWeight = Math.max(map[name].maxWeight, maxW);
+          map[name].lastLoggedAt = s.completed_at!;
+        }
+      });
+    });
+
+    return Object.values(map);
+  }, [sessions]);
+
+  // Log exercise sets directly (free-flowing on-demand logging)
+  const logExerciseSets = async (payload: LogExercisePayload) => {
+    const validSets = payload.sets.filter((s) => s.weight > 0 || s.reps > 0);
+    if (validSets.length === 0) return;
+
+    const timestamp = payload.loggedAt || new Date().toISOString();
+    const todayStr = new Date(timestamp).toDateString();
 
     if (isDemoMode || !user) {
-      // Save locally
-      const newSession: WorkoutSession = {
-        id: `session-${Date.now()}`,
-        user_id: user?.id || 'demo-user',
-        routine_id: input.routineId,
-        routine_name: input.routineName,
-        started_at: input.startedAt,
-        completed_at: input.completedAt,
-        session_notes: input.sessionNotes,
-        logged_exercises: input.exercises.map((e, eIdx) => ({
-          id: `le-${Date.now()}-${eIdx}`,
-          session_id: `session-${Date.now()}`,
-          exercise_id: e.exerciseId,
-          exercise_name: e.exerciseName,
-          exercise_notes: e.exerciseNotes,
-          order_index: eIdx,
-          sets: e.sets.map((s) => ({
-            id: `set-${Date.now()}-${s.setNumber}`,
-            logged_exercise_id: `le-${Date.now()}-${eIdx}`,
-            set_number: s.setNumber,
-            weight: s.weight,
-            reps: s.reps,
-            created_at: new Date().toISOString(),
-          })),
+      // Find today's session or create one
+      const existingSessionIndex = sessions.findIndex(
+        (s) => s.completed_at && new Date(s.completed_at).toDateString() === todayStr
+      );
+
+      let updatedSessions = [...sessions];
+      const newLoggedEx = {
+        id: `le-${Date.now()}`,
+        session_id: '',
+        exercise_id: payload.exerciseId,
+        exercise_name: payload.exerciseName,
+        exercise_notes: payload.exerciseNotes,
+        order_index: 0,
+        sets: validSets.map((s, idx) => ({
+          id: `set-${Date.now()}-${idx + 1}`,
+          logged_exercise_id: `le-${Date.now()}`,
+          set_number: s.setNumber || idx + 1,
+          weight: Number(s.weight) || 0,
+          reps: Number(s.reps) || 0,
+          created_at: timestamp,
         })),
       };
 
-      const updatedSessions = [newSession, ...sessions];
+      if (existingSessionIndex >= 0) {
+        const existingSession = { ...updatedSessions[existingSessionIndex] };
+        newLoggedEx.session_id = existingSession.id;
+        newLoggedEx.order_index = (existingSession.logged_exercises?.length || 0);
+
+        // Replace or append logged exercise
+        const existingExIdx = existingSession.logged_exercises?.findIndex(
+          (e) => e.exercise_name.trim().toLowerCase() === payload.exerciseName.trim().toLowerCase()
+        );
+
+        let updatedLoggedExercises = [...(existingSession.logged_exercises || [])];
+        if (existingExIdx !== undefined && existingExIdx >= 0) {
+          // Update sets and notes for this exercise today
+          updatedLoggedExercises[existingExIdx] = {
+            ...updatedLoggedExercises[existingExIdx],
+            exercise_notes: payload.exerciseNotes || updatedLoggedExercises[existingExIdx].exercise_notes,
+            sets: validSets.map((s, idx) => ({
+              id: `set-${Date.now()}-${idx + 1}`,
+              logged_exercise_id: updatedLoggedExercises[existingExIdx].id,
+              set_number: s.setNumber || idx + 1,
+              weight: Number(s.weight) || 0,
+              reps: Number(s.reps) || 0,
+              created_at: timestamp,
+            })),
+          };
+        } else {
+          updatedLoggedExercises.push(newLoggedEx);
+        }
+
+        existingSession.logged_exercises = updatedLoggedExercises;
+        existingSession.completed_at = timestamp;
+        if (payload.routineName && (!existingSession.routine_name || existingSession.routine_name === 'Daily Workout')) {
+          existingSession.routine_name = payload.routineName;
+          existingSession.routine_id = payload.routineId;
+        }
+
+        updatedSessions[existingSessionIndex] = existingSession;
+      } else {
+        const newSession: WorkoutSession = {
+          id: `session-${Date.now()}`,
+          user_id: user?.id || 'demo-user',
+          routine_id: payload.routineId,
+          routine_name: payload.routineName || 'Daily Workout',
+          started_at: timestamp,
+          completed_at: timestamp,
+          session_notes: '',
+          logged_exercises: [newLoggedEx],
+        };
+        newLoggedEx.session_id = newSession.id;
+        updatedSessions = [newSession, ...updatedSessions];
+      }
+
       setSessions(updatedSessions);
       localStorage.setItem(LOCAL_STORAGE_SESSIONS, JSON.stringify(updatedSessions));
 
-      // Update routine last_completed_at
-      if (input.routineId) {
+      // Update routine last_completed_at if routineId provided
+      if (payload.routineId) {
         const updatedRoutines = routines.map((r) =>
-          r.id === input.routineId ? { ...r, last_completed_at: input.completedAt } : r
+          r.id === payload.routineId ? { ...r, last_completed_at: timestamp } : r
         );
         setRoutines(updatedRoutines);
         localStorage.setItem(LOCAL_STORAGE_ROUTINES, JSON.stringify(updatedRoutines));
       }
 
       computePRs(updatedSessions);
-      setActiveSession(null);
-      setLoading(false);
       return;
     }
 
     try {
-      // 1. Insert Workout Session
-      const { data: sessionData, error: sessionErr } = await supabase
+      // 1. Ensure exercise exists in DB
+      let exerciseId = payload.exerciseId;
+      if (!exerciseId) {
+        const { data: existingEx } = await supabase
+          .from('exercises')
+          .select('id')
+          .eq('user_id', user.id)
+          .ilike('name', payload.exerciseName.trim())
+          .maybeSingle();
+
+        if (existingEx) {
+          exerciseId = existingEx.id;
+        } else {
+          const { data: newEx } = await supabase
+            .from('exercises')
+            .insert({
+              user_id: user.id,
+              name: payload.exerciseName.trim(),
+              target_muscle_group: payload.targetMuscleGroup || 'General',
+              default_unit: 'kg',
+            })
+            .select()
+            .single();
+
+          if (newEx) exerciseId = newEx.id;
+        }
+      }
+
+      // 2. Create or find today's session
+      // Query if a session exists today
+      const todayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+      const { data: existingSessions } = await supabase
         .from('workout_sessions')
-        .insert({
-          user_id: user.id,
-          routine_id: input.routineId || null,
-          routine_name: input.routineName,
-          started_at: input.startedAt,
-          completed_at: input.completedAt,
-          session_notes: input.sessionNotes || null,
-        })
-        .select()
-        .single();
+        .select('id, routine_id, routine_name')
+        .eq('user_id', user.id)
+        .gte('completed_at', todayStart)
+        .order('completed_at', { ascending: false })
+        .limit(1);
 
-      if (sessionErr) throw sessionErr;
+      let sessionId = existingSessions && existingSessions.length > 0 ? existingSessions[0].id : null;
 
-      // 2. Insert Logged Exercises & Sets
-      for (let i = 0; i < input.exercises.length; i++) {
-        const ex = input.exercises[i];
-        const { data: exData, error: exErr } = await supabase
-          .from('logged_exercises')
+      if (!sessionId) {
+        const { data: newSession, error: sErr } = await supabase
+          .from('workout_sessions')
           .insert({
-            session_id: sessionData.id,
-            exercise_id: ex.exerciseId || null,
-            exercise_name: ex.exerciseName,
-            exercise_notes: ex.exerciseNotes || null,
-            order_index: i,
+            user_id: user.id,
+            routine_id: payload.routineId || null,
+            routine_name: payload.routineName || 'Daily Workout',
+            started_at: timestamp,
+            completed_at: timestamp,
           })
           .select()
           .single();
 
-        if (exErr) throw exErr;
-
-        if (ex.sets.length > 0) {
-          const setsPayload = ex.sets.map((s) => ({
-            logged_exercise_id: exData.id,
-            set_number: s.setNumber,
-            weight: s.weight,
-            reps: s.reps,
-          }));
-
-          const { error: setsErr } = await supabase.from('logged_sets').insert(setsPayload);
-          if (setsErr) throw setsErr;
-        }
+        if (sErr) throw sErr;
+        sessionId = newSession.id;
       }
 
-      // 3. Update Routine last_completed_at
-      if (input.routineId) {
+      // 3. Insert logged exercise & sets
+      const { data: exRow, error: exErr } = await supabase
+        .from('logged_exercises')
+        .insert({
+          session_id: sessionId,
+          exercise_id: exerciseId || null,
+          exercise_name: payload.exerciseName.trim(),
+          exercise_notes: payload.exerciseNotes || null,
+          order_index: 0,
+        })
+        .select()
+        .single();
+
+      if (exErr) throw exErr;
+
+      const setsPayload = validSets.map((s, idx) => ({
+        logged_exercise_id: exRow.id,
+        set_number: s.setNumber || idx + 1,
+        weight: Number(s.weight) || 0,
+        reps: Number(s.reps) || 0,
+      }));
+
+      const { error: setsErr } = await supabase.from('logged_sets').insert(setsPayload);
+      if (setsErr) throw setsErr;
+
+      // 4. Update routine last_completed_at if routineId
+      if (payload.routineId) {
         await supabase
           .from('routines')
-          .update({ last_completed_at: input.completedAt })
-          .eq('id', input.routineId);
+          .update({ last_completed_at: timestamp })
+          .eq('id', payload.routineId);
       }
 
-      // Refresh all data
       await fetchData();
-      setActiveSession(null);
     } catch (err) {
-      console.error('Failed to save workout session to Supabase:', err);
+      console.error('Error in logExerciseSets:', err);
       // Fallback save to local storage
-      const newSession: WorkoutSession = {
-        id: `session-${Date.now()}`,
-        user_id: user.id,
-        routine_id: input.routineId,
-        routine_name: input.routineName,
-        started_at: input.startedAt,
-        completed_at: input.completedAt,
-        session_notes: input.sessionNotes,
-        logged_exercises: input.exercises.map((e, eIdx) => ({
-          id: `le-${Date.now()}-${eIdx}`,
-          session_id: `session-${Date.now()}`,
-          exercise_id: e.exerciseId,
-          exercise_name: e.exerciseName,
-          exercise_notes: e.exerciseNotes,
-          order_index: eIdx,
-          sets: e.sets.map((s) => ({
-            id: `set-${Date.now()}-${s.setNumber}`,
-            logged_exercise_id: `le-${Date.now()}-${eIdx}`,
-            set_number: s.setNumber,
-            weight: s.weight,
-            reps: s.reps,
-            created_at: new Date().toISOString(),
-          })),
-        })),
-      };
-      setSessions([newSession, ...sessions]);
-      setActiveSession(null);
-    } finally {
-      setLoading(false);
+      const updatedSessions = [...sessions];
+      setSessions(updatedSessions);
+    }
+  };
+
+  // Mark a routine as completed for rotation
+  const markRoutineCompleted = async (routineId: string) => {
+    const timestamp = new Date().toISOString();
+    if (isDemoMode || !user) {
+      const updatedRoutines = routines.map((r) =>
+        r.id === routineId ? { ...r, last_completed_at: timestamp } : r
+      );
+      setRoutines(updatedRoutines);
+      localStorage.setItem(LOCAL_STORAGE_ROUTINES, JSON.stringify(updatedRoutines));
+      return;
+    }
+
+    try {
+      await supabase.from('routines').update({ last_completed_at: timestamp }).eq('id', routineId);
+      await fetchData();
+    } catch (err) {
+      console.error('Error marking routine completed:', err);
     }
   };
 
@@ -550,7 +681,6 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
 
     try {
-      // 1. Insert Routine
       const { data: routineData, error: routineErr } = await supabase
         .from('routines')
         .insert({
@@ -565,11 +695,8 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       if (routineErr) throw routineErr;
 
-      // 2. Insert or find exercises and link to routine
       for (let i = 0; i < exerciseInputs.length; i++) {
         const item = exerciseInputs[i];
-        
-        // Find existing exercise or create new
         let exerciseId = '';
         const { data: existingEx } = await supabase
           .from('exercises')
@@ -596,7 +723,6 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
           exerciseId = newEx.id;
         }
 
-        // Link to routine_exercises
         await supabase.from('routine_exercises').insert({
           routine_id: routineData.id,
           exercise_id: exerciseId,
@@ -608,6 +734,201 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
       await fetchData();
     } catch (err) {
       console.error('Error creating routine in Supabase:', err);
+    }
+  };
+
+  // Update Existing Routine
+  const updateRoutine = async (
+    routineId: string,
+    name: string,
+    description: string,
+    restDays: number,
+    exerciseInputs: { name: string; muscle: string; targetSets: number }[]
+  ) => {
+    if (isDemoMode || !user) {
+      const updated = routines.map((r) => {
+        if (r.id !== routineId) return r;
+        return {
+          ...r,
+          name,
+          description,
+          target_rest_days: restDays,
+          exercises: exerciseInputs.map((e, idx) => ({
+            id: `re-${Date.now()}-${idx}`,
+            routine_id: routineId,
+            exercise_id: `ex-${Date.now()}-${idx}`,
+            target_sets: e.targetSets,
+            order_index: idx,
+            exercise: {
+              id: `ex-${Date.now()}-${idx}`,
+              user_id: 'demo-user',
+              name: e.name,
+              target_muscle_group: e.muscle,
+              default_unit: 'kg' as const,
+              created_at: new Date().toISOString(),
+            },
+          })),
+        };
+      });
+
+      setRoutines(updated);
+      localStorage.setItem(LOCAL_STORAGE_ROUTINES, JSON.stringify(updated));
+      return;
+    }
+
+    try {
+      // 1. Update Routine details
+      const { error: routineErr } = await supabase
+        .from('routines')
+        .update({
+          name,
+          description,
+          target_rest_days: restDays,
+        })
+        .eq('id', routineId);
+
+      if (routineErr) throw routineErr;
+
+      // 2. Delete existing routine_exercises
+      await supabase.from('routine_exercises').delete().eq('routine_id', routineId);
+
+      // 3. Re-insert exercises
+      for (let i = 0; i < exerciseInputs.length; i++) {
+        const item = exerciseInputs[i];
+        let exerciseId = '';
+        const { data: existingEx } = await supabase
+          .from('exercises')
+          .select('id')
+          .eq('user_id', user.id)
+          .ilike('name', item.name.trim())
+          .maybeSingle();
+
+        if (existingEx) {
+          exerciseId = existingEx.id;
+        } else {
+          const { data: newEx, error: newExErr } = await supabase
+            .from('exercises')
+            .insert({
+              user_id: user.id,
+              name: item.name.trim(),
+              target_muscle_group: item.muscle || 'General',
+              default_unit: 'kg',
+            })
+            .select()
+            .single();
+
+          if (newExErr) throw newExErr;
+          exerciseId = newEx.id;
+        }
+
+        await supabase.from('routine_exercises').insert({
+          routine_id: routineId,
+          exercise_id: exerciseId,
+          target_sets: item.targetSets,
+          order_index: i,
+        });
+      }
+
+      await fetchData();
+    } catch (err) {
+      console.error('Error updating routine in Supabase:', err);
+    }
+  };
+
+  // Add or update an individual exercise inside a routine
+  const addOrUpdateExerciseToRoutine = async (
+    routineId: string,
+    exerciseName: string,
+    muscle: string,
+    targetSets: number
+  ) => {
+    const routine = routines.find((r) => r.id === routineId);
+    if (!routine) return;
+
+    const existingExercises = (routine.exercises || []).map((re) => ({
+      name: re.exercise?.name || 'Exercise',
+      muscle: re.exercise?.target_muscle_group || 'General',
+      targetSets: re.target_sets || 3,
+    }));
+
+    const existingIdx = existingExercises.findIndex(
+      (e) => e.name.trim().toLowerCase() === exerciseName.trim().toLowerCase()
+    );
+
+    if (existingIdx >= 0) {
+      existingExercises[existingIdx] = {
+        name: exerciseName.trim(),
+        muscle,
+        targetSets,
+      };
+    } else {
+      existingExercises.push({
+        name: exerciseName.trim(),
+        muscle,
+        targetSets,
+      });
+    }
+
+    await updateRoutine(
+      routine.id,
+      routine.name,
+      routine.description || '',
+      routine.target_rest_days || 3,
+      existingExercises
+    );
+  };
+
+  // Remove an exercise from a routine
+  const removeExerciseFromRoutine = async (routineId: string, exerciseIndex: number) => {
+    const routine = routines.find((r) => r.id === routineId);
+    if (!routine || !routine.exercises) return;
+
+    const remainingExercises = routine.exercises
+      .filter((_, idx) => idx !== exerciseIndex)
+      .map((re) => ({
+        name: re.exercise?.name || 'Exercise',
+        muscle: re.exercise?.target_muscle_group || 'General',
+        targetSets: re.target_sets || 3,
+      }));
+
+    await updateRoutine(
+      routine.id,
+      routine.name,
+      routine.description || '',
+      routine.target_rest_days || 3,
+      remainingExercises
+    );
+  };
+
+  // Bulk save / replace routines
+  const bulkSaveRoutines = async (
+    newRoutines: {
+      name: string;
+      description?: string;
+      targetRestDays: number;
+      exercises: { name: string; muscle: string; targetSets: number }[];
+    }[]
+  ) => {
+    for (const r of newRoutines) {
+      const existing = routines.find(
+        (er) => er.name.trim().toLowerCase() === r.name.trim().toLowerCase()
+      );
+      if (existing) {
+        await updateRoutine(
+          existing.id,
+          r.name,
+          r.description || '',
+          r.targetRestDays,
+          r.exercises
+        );
+      } else {
+        await createRoutine(
+          r.name,
+          r.description || '',
+          r.targetRestDays,
+          r.exercises
+        );
+      }
     }
   };
 
@@ -647,13 +968,18 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
         sessions,
         personalRecords,
         loading,
-        activeSession,
-        startActiveSession,
-        cancelActiveSession,
-        saveCompletedSession,
-        createRoutine,
-        deleteRoutine,
+        logExerciseSets,
+        getExerciseHistory,
         getLastPerformance,
+        getTodayLoggedSetsCount,
+        getTodayActivity,
+        markRoutineCompleted,
+        createRoutine,
+        updateRoutine,
+        addOrUpdateExerciseToRoutine,
+        removeExerciseFromRoutine,
+        bulkSaveRoutines,
+        deleteRoutine,
         loadStarterRoutines,
         refreshData: fetchData,
       }}

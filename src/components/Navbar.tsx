@@ -10,10 +10,10 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({ currentTab, onSelectTab }) => {
   const tabs = [
-    { id: 'workouts' as TabType, label: 'Workouts', icon: Dumbbell },
+    { id: 'workouts' as TabType, label: 'Exercises', icon: Dumbbell },
     { id: 'analytics' as TabType, label: 'Analytics', icon: LineChart },
     { id: 'history' as TabType, label: 'History', icon: History },
-    { id: 'routines' as TabType, label: 'Routines', icon: Layers },
+    { id: 'routines' as TabType, label: 'Configuration', icon: Layers },
     { id: 'db-setup' as TabType, label: 'Database', icon: Database },
   ];
 
