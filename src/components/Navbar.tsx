@@ -1,7 +1,7 @@
 import React from 'react';
-import { Dumbbell, LineChart, History, Layers, Database } from 'lucide-react';
+import { Home, Dumbbell, LineChart, History, Layers, Database } from 'lucide-react';
 
-export type TabType = 'workouts' | 'analytics' | 'history' | 'routines' | 'db-setup';
+export type TabType = 'home' | 'workouts' | 'analytics' | 'history' | 'routines' | 'db-setup';
 
 interface NavbarProps {
   currentTab: TabType;
@@ -10,6 +10,7 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({ currentTab, onSelectTab }) => {
   const tabs = [
+    { id: 'home' as TabType, label: 'Home', icon: Home },
     { id: 'workouts' as TabType, label: 'Exercises', icon: Dumbbell },
     { id: 'analytics' as TabType, label: 'Analytics', icon: LineChart },
     { id: 'history' as TabType, label: 'History', icon: History },

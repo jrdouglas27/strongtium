@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { WorkoutProvider } from './context/WorkoutContext';
 import { Header } from './components/Header';
 import { Navbar, TabType } from './components/Navbar';
+import { HomeDashboard } from './components/HomeDashboard';
 import { WorkoutsHub } from './components/WorkoutsHub';
 import { AnalyticsView } from './components/AnalyticsView';
 import { HistoryView } from './components/HistoryView';
@@ -13,7 +14,7 @@ import { Dumbbell } from 'lucide-react';
 
 const AppContent: React.FC = () => {
   const { user, loading } = useAuth();
-  const [currentTab, setCurrentTab] = useState<TabType>('workouts');
+  const [currentTab, setCurrentTab] = useState<TabType>('home');
 
   // Loading Session State
   if (loading) {
@@ -46,6 +47,9 @@ const AppContent: React.FC = () => {
 
       {/* Main View Area */}
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-6">
+        {currentTab === 'home' && (
+          <HomeDashboard onNavigate={(tab) => setCurrentTab(tab)} />
+        )}
         {currentTab === 'workouts' && (
           <WorkoutsHub onNavigateToRoutines={() => setCurrentTab('routines')} />
         )}
