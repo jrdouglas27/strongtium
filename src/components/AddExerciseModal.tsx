@@ -1,16 +1,19 @@
 import React, { useState } from 'react';
-import { X, Dumbbell, Plus } from 'lucide-react';
+import { X, Dumbbell, Plus, Calendar } from 'lucide-react';
 import { useWorkout } from '../context/WorkoutContext';
 import { MUSCLE_GROUPS } from '../types/workout';
+import { toLocalISODate, formatWorkoutDateLabel } from '../lib/calculations';
 
 interface AddExerciseModalProps {
   onClose: () => void;
   defaultRoutineId?: string;
+  selectedDate?: string;
 }
 
 export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
   onClose,
   defaultRoutineId,
+  selectedDate,
 }) => {
   const { routines, logExerciseSets } = useWorkout();
   const [name, setName] = useState('');
@@ -20,6 +23,7 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
   const [initialWeight, setInitialWeight] = useState<number | ''>('');
   const [initialReps, setInitialReps] = useState<number | ''>('');
   const [logNow, setLogNow] = useState(false);
+  const [logDate, setLogDate] = useState<string>(selectedDate || toLocalISODate());
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const muscleGroups = MUSCLE_GROUPS;
@@ -32,12 +36,23 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
     try {
       const selectedRoutine = routines.find((r) => r.id === routineId);
 
+      const now = new Date();
+      let loggedAt: string;
+      if (logDate === toLocalISODate()) {
+        loggedAt = now.toISOString();
+      } else {
+        const [y, m, d] = logDate.split('-').map(Number);
+        const targetDate = new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds());
+        loggedAt = targetDate.toISOString();
+      }
+
       if (logNow && (Number(initialWeight) > 0 || Number(initialReps) > 0)) {
         await logExerciseSets({
           exerciseName: name.trim(),
           targetMuscleGroup: muscle,
           routineId: routineId || undefined,
           routineName: selectedRoutine?.name || undefined,
+          loggedAt,
           sets: Array.from({ length: targetSets }, (_, i) => ({
             setNumber: i + 1,
             weight: Number(initialWeight) || 0,
@@ -51,6 +66,7 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
           targetMuscleGroup: muscle,
           routineId: routineId || undefined,
           routineName: selectedRoutine?.name || undefined,
+          loggedAt,
           sets: [
             {
               setNumber: 1,
@@ -147,36 +163,59 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
             </div>
 
             {logNow && (
-              <div className="grid grid-cols-3 gap-2 pt-1 text-xs">
+              <div className="space-y-2 pt-1">
                 <div>
-                  <span className="text-[10px] text-[#94a3b8] font-bold block mb-1">Target Sets</span>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] text-[#94a3b8] font-bold flex items-center space-x-1">
+                      <Calendar className="w-3 h-3 text-[#8bb4cb]" />
+                      <span>Log Date</span>
+                    </span>
+                    <span className="text-[10px] font-mono text-[#8bb4cb] font-bold">
+                      {formatWorkoutDateLabel(logDate)}
+                    </span>
+                  </div>
                   <input
-                    type="number"
-                    value={targetSets}
-                    onChange={(e) => setTargetSets(Math.max(1, parseInt(e.target.value) || 1))}
-                    className="w-full bg-[#3d5a6c] border border-[#4e7085] rounded-lg p-2 text-white font-mono text-center"
+                    type="date"
+                    max={toLocalISODate()}
+                    value={logDate}
+                    onChange={(e) => {
+                      if (e.target.value) setLogDate(e.target.value);
+                    }}
+                    className="w-full bg-[#3d5a6c] border border-[#4e7085] rounded-lg p-2 text-white font-mono text-xs focus:outline-none focus:border-[#8bb4cb]"
                   />
                 </div>
-                <div>
-                  <span className="text-[10px] text-[#94a3b8] font-bold block mb-1">Weight (kg)</span>
-                  <input
-                    type="number"
-                    step="0.5"
-                    placeholder="0"
-                    value={initialWeight}
-                    onChange={(e) => setInitialWeight(parseFloat(e.target.value) || '')}
-                    className="w-full bg-[#3d5a6c] border border-[#4e7085] rounded-lg p-2 text-white font-mono text-center"
-                  />
-                </div>
-                <div>
-                  <span className="text-[10px] text-[#94a3b8] font-bold block mb-1">Reps</span>
-                  <input
-                    type="number"
-                    placeholder="0"
-                    value={initialReps}
-                    onChange={(e) => setInitialReps(parseInt(e.target.value, 10) || '')}
-                    className="w-full bg-[#3d5a6c] border border-[#4e7085] rounded-lg p-2 text-white font-mono text-center"
-                  />
+
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div>
+                    <span className="text-[10px] text-[#94a3b8] font-bold block mb-1">Target Sets</span>
+                    <input
+                      type="number"
+                      value={targetSets}
+                      onChange={(e) => setTargetSets(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-full bg-[#3d5a6c] border border-[#4e7085] rounded-lg p-2 text-white font-mono text-center"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-[#94a3b8] font-bold block mb-1">Weight (kg)</span>
+                    <input
+                      type="number"
+                      step="0.5"
+                      placeholder="0"
+                      value={initialWeight}
+                      onChange={(e) => setInitialWeight(parseFloat(e.target.value) || '')}
+                      className="w-full bg-[#3d5a6c] border border-[#4e7085] rounded-lg p-2 text-white font-mono text-center"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-[#94a3b8] font-bold block mb-1">Reps</span>
+                    <input
+                      type="number"
+                      placeholder="0"
+                      value={initialReps}
+                      onChange={(e) => setInitialReps(parseInt(e.target.value, 10) || '')}
+                      className="w-full bg-[#3d5a6c] border border-[#4e7085] rounded-lg p-2 text-white font-mono text-center"
+                    />
+                  </div>
                 </div>
               </div>
             )}

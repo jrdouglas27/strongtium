@@ -111,3 +111,50 @@ export function formatRelativeDays(dateString: string | null | undefined): strin
   if (diffDays === 1) return 'Yesterday';
   return `${diffDays} days ago`;
 }
+
+/**
+ * Return date formatted as YYYY-MM-DD in local time
+ */
+export function toLocalISODate(d: Date = new Date()): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Return yesterday's date formatted as YYYY-MM-DD in local time
+ */
+export function getYesterdayISODate(): string {
+  const yest = new Date();
+  yest.setDate(yest.getDate() - 1);
+  return toLocalISODate(yest);
+}
+
+/**
+ * Format a YYYY-MM-DD string into a human-friendly label (e.g. "Today", "Yesterday", "Mon, Oct 12")
+ */
+export function formatWorkoutDateLabel(dateStr: string): string {
+  const today = toLocalISODate(new Date());
+  if (dateStr === today) return 'Today';
+
+  const yesterday = getYesterdayISODate();
+  if (dateStr === yesterday) return 'Yesterday';
+
+  const d = new Date(`${dateStr}T12:00:00`);
+  return d.toLocaleDateString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+/**
+ * Check if two dates represent the same calendar day
+ */
+export function isSameDate(d1: Date | string, d2: Date | string): boolean {
+  const date1 = typeof d1 === 'string' ? new Date(d1.includes('T') ? d1 : `${d1}T12:00:00`) : d1;
+  const date2 = typeof d2 === 'string' ? new Date(d2.includes('T') ? d2 : `${d2}T12:00:00`) : d2;
+  return date1.toDateString() === date2.toDateString();
+}
+

@@ -13,7 +13,13 @@ import {
   Calendar,
 } from 'lucide-react';
 import { useWorkout } from '../context/WorkoutContext';
-import { calculateVolume, formatRelativeDays, formatDate } from '../lib/calculations';
+import {
+  calculateVolume,
+  formatRelativeDays,
+  formatDate,
+  toLocalISODate,
+  formatWorkoutDateLabel,
+} from '../lib/calculations';
 
 interface ExerciseCardProps {
   exerciseName: string;
@@ -22,6 +28,7 @@ interface ExerciseCardProps {
   routineId?: string;
   targetSets?: number;
   onFocusRoutine?: (routineId: string) => void;
+  selectedDate?: string;
 }
 
 interface SetRowState {
@@ -37,6 +44,7 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
   routineName,
   routineId,
   targetSets = 3,
+  selectedDate,
 }) => {
   const {
     getLastPerformance,
@@ -50,16 +58,22 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
   const pr = personalRecords[exerciseName.trim()];
   const history = getExerciseHistory(exerciseName);
 
-  // Check if this exercise was already logged today
-  const todayStr = new Date().toDateString();
-  const todayEntry = sessions
-    .filter((s) => s.completed_at && new Date(s.completed_at).toDateString() === todayStr)
+  // Date context: defaults to local today if not specified
+  const activeDate = selectedDate || toLocalISODate();
+  const isToday = activeDate === toLocalISODate();
+  const dateLabel = formatWorkoutDateLabel(activeDate);
+
+  // Check if this exercise was already logged on the selected date
+  const targetDateObj = new Date(`${activeDate}T12:00:00`);
+  const targetDateStr = targetDateObj.toDateString();
+  const loggedEntry = sessions
+    .filter((s) => s.completed_at && new Date(s.completed_at).toDateString() === targetDateStr)
     .flatMap((s) => s.logged_exercises || [])
     .find((le) => le.exercise_name.trim().toLowerCase() === exerciseName.trim().toLowerCase());
 
   const [sets, setSets] = useState<SetRowState[]>(() => {
-    if (todayEntry && todayEntry.sets.length > 0) {
-      return todayEntry.sets.map((s) => ({
+    if (loggedEntry && loggedEntry.sets.length > 0) {
+      return loggedEntry.sets.map((s) => ({
         setNumber: s.set_number,
         weight: Number(s.weight),
         reps: Number(s.reps),
@@ -80,27 +94,39 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
     });
   });
 
-  const [notes, setNotes] = useState<string>(todayEntry?.exercise_notes || '');
+  const [notes, setNotes] = useState<string>(loggedEntry?.exercise_notes || '');
   const [showHistory, setShowHistory] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
 
-  // Sync state if today's entry updates
+  // Sync state if active date or date's entry updates
   useEffect(() => {
-    if (todayEntry && todayEntry.sets.length > 0) {
+    if (loggedEntry && loggedEntry.sets.length > 0) {
       setSets(
-        todayEntry.sets.map((s) => ({
+        loggedEntry.sets.map((s) => ({
           setNumber: s.set_number,
           weight: Number(s.weight),
           reps: Number(s.reps),
           isCompleted: true,
         }))
       );
-      if (todayEntry.exercise_notes) {
-        setNotes(todayEntry.exercise_notes);
-      }
+      setNotes(loggedEntry.exercise_notes || '');
+    } else {
+      const count = targetSets || 3;
+      setSets(
+        Array.from({ length: count }, (_, i) => {
+          const prevSet = lastPerf?.sets[i] || lastPerf?.sets[lastPerf?.sets.length - 1];
+          return {
+            setNumber: i + 1,
+            weight: prevSet ? prevSet.weight : 0,
+            reps: prevSet ? prevSet.reps : 0,
+            isCompleted: false,
+          };
+        })
+      );
+      setNotes('');
     }
-  }, [todayEntry]);
+  }, [loggedEntry, activeDate, targetSets, lastPerf]);
 
   const handleUpdateSet = (setIdx: number, field: 'weight' | 'reps', value: number) => {
     const updated = [...sets];
@@ -167,12 +193,23 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
 
     setIsSaving(true);
     try {
+      const now = new Date();
+      let loggedAt: string;
+      if (isToday) {
+        loggedAt = now.toISOString();
+      } else {
+        const [y, m, d] = activeDate.split('-').map(Number);
+        const targetDate = new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds());
+        loggedAt = targetDate.toISOString();
+      }
+
       await logExerciseSets({
         exerciseName,
         targetMuscleGroup,
         routineId,
         routineName,
         exerciseNotes: notes,
+        loggedAt,
         sets: valid.map((s, idx) => ({
           setNumber: idx + 1,
           weight: Number(s.weight) || 0,
@@ -278,16 +315,16 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
         )}
       </div>
 
-      {/* Today Status Pill if already logged */}
-      {todayEntry && (
+      {/* Target Date Status Pill if already logged */}
+      {loggedEntry && (
         <div className="bg-[#274a38] border border-[#3c6e54] text-[#8fb89e] px-3 py-1.5 rounded-xl text-xs flex items-center justify-between font-medium">
           <div className="flex items-center space-x-1.5">
             <Check className="w-3.5 h-3.5 text-[#8fb89e]" />
-            <span className="font-bold text-white">Logged Today:</span>
-            <span>{todayEntry.sets.length} sets completed</span>
+            <span className="font-bold text-white">Logged for {dateLabel}:</span>
+            <span>{loggedEntry.sets.length} sets completed</span>
           </div>
           <span className="font-mono text-[11px] text-white/90">
-            {todayEntry.sets.reduce((acc, s) => acc + Number(s.weight) * Number(s.reps), 0)} kg volume
+            {loggedEntry.sets.reduce((acc, s) => acc + Number(s.weight) * Number(s.reps), 0)} kg volume
           </span>
         </div>
       )}
@@ -295,7 +332,14 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
       {/* Free-Flowing Inline Set Inputs */}
       <div className="space-y-2">
         <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-[#94a3b8] px-1">
-          <span>Log Today's Sets</span>
+          <span className="flex items-center space-x-1.5">
+            <span>Log Sets ({dateLabel})</span>
+            {!isToday && (
+              <span className="text-[9px] bg-[#2d4554] text-[#8bb4cb] border border-[#3f5d70] px-1.5 py-0.5 rounded font-mono font-normal">
+                Retroactive
+              </span>
+            )}
+          </span>
           {lastPerf && (
             <button
               type="button"
@@ -474,9 +518,9 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
               <span>
                 {isSaving
                   ? 'Saving...'
-                  : todayEntry
-                  ? 'Update Logged Sets'
-                  : `Log ${sets.filter((s) => s.weight > 0 || s.reps > 0).length || sets.length} Sets (${Math.round(currentVolume)}kg)`}
+                  : loggedEntry
+                  ? `Update ${dateLabel}'s Sets`
+                  : `Log Sets for ${dateLabel} (${Math.round(currentVolume)}kg)`}
               </span>
             </>
           )}

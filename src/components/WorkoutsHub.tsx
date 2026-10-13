@@ -9,11 +9,19 @@ import {
   Layers,
   Zap,
   ArrowRight,
+  Calendar,
+  Clock,
 } from 'lucide-react';
 import { useWorkout } from '../context/WorkoutContext';
 import { ExerciseCard } from './ExerciseCard';
 import { AddExerciseModal } from './AddExerciseModal';
-import { calculateRoutineDueStatus, formatRelativeDays } from '../lib/calculations';
+import {
+  calculateRoutineDueStatus,
+  formatRelativeDays,
+  toLocalISODate,
+  getYesterdayISODate,
+  formatWorkoutDateLabel,
+} from '../lib/calculations';
 
 interface WorkoutsHubProps {
   onNavigateToRoutines: () => void;
@@ -25,7 +33,7 @@ export const WorkoutsHub: React.FC<WorkoutsHubProps> = ({ onNavigateToRoutines }
     sessions,
     loading,
     loadStarterRoutines,
-    getTodayActivity,
+    getActivityForDate,
     markRoutineCompleted,
   } = useWorkout();
 
@@ -49,6 +57,15 @@ export const WorkoutsHub: React.FC<WorkoutsHubProps> = ({ onNavigateToRoutines }
     calculated.sort((a, b) => (a.status.daysUntilDue || 0) - (b.status.daysUntilDue || 0));
     return calculated[0].routine;
   }, [routines]);
+
+  // Date selection state (defaults to today for frictionless real-time logging)
+  const todayISODate = useMemo(() => toLocalISODate(), []);
+  const yesterdayISODate = useMemo(() => getYesterdayISODate(), []);
+  const [selectedDate, setSelectedDate] = useState<string>(todayISODate);
+
+  const isSelectedToday = selectedDate === todayISODate;
+  const isSelectedYesterday = selectedDate === yesterdayISODate;
+  const selectedDateLabel = formatWorkoutDateLabel(selectedDate);
 
   // Selected routine filter (or 'all')
   const [selectedRoutineId, setSelectedRoutineId] = useState<string>('auto');
@@ -147,14 +164,21 @@ export const WorkoutsHub: React.FC<WorkoutsHubProps> = ({ onNavigateToRoutines }
     return list;
   }, [activeRoutineId, currentRoutine, allExerciseItems, searchQuery]);
 
-  const todayActivities = getTodayActivity();
-  const totalTodaySets = todayActivities.reduce((acc, a) => acc + a.setsCount, 0);
-  const totalTodayVolume = todayActivities.reduce((acc, a) => acc + a.totalVolume, 0);
+  const dateActivities = getActivityForDate(selectedDate);
+  const totalDateSets = dateActivities.reduce((acc, a) => acc + a.setsCount, 0);
+  const totalDateVolume = dateActivities.reduce((acc, a) => acc + a.totalVolume, 0);
 
   const handleMarkRoutineDone = async (routineId: string) => {
     setMarkingDone(true);
     try {
-      await markRoutineCompleted(routineId);
+      const now = new Date();
+      let completedAt: string | undefined;
+      if (!isSelectedToday) {
+        const [y, m, d] = selectedDate.split('-').map(Number);
+        const targetDate = new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds());
+        completedAt = targetDate.toISOString();
+      }
+      await markRoutineCompleted(routineId, completedAt);
     } finally {
       setMarkingDone(false);
     }
@@ -171,20 +195,100 @@ export const WorkoutsHub: React.FC<WorkoutsHubProps> = ({ onNavigateToRoutines }
 
   return (
     <div className="space-y-6 pb-20">
-      {/* Today's Activity Bar (Zero Pressure Momentum) */}
-      {todayActivities.length > 0 && (
+      {/* Date Navigator Bar (Real-Time vs Retrospective Logging) */}
+      <div className="bg-[#2d4554] border border-[#3f5d70] rounded-2xl p-3.5 sm:p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center space-x-3">
+          <div className="p-2.5 bg-[#3d5a6c] border border-[#4e7085] rounded-xl text-[#8bb4cb] shrink-0">
+            <Calendar className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="flex items-center space-x-2">
+              <span className="text-xs font-extrabold text-white">Logging Date:</span>
+              {isSelectedToday ? (
+                <span className="inline-flex items-center space-x-1.5 bg-[#274a38] text-[#8fb89e] border border-[#3c6e54] text-[10px] font-extrabold px-2.5 py-0.5 rounded-full">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#8fb89e] animate-pulse" />
+                  <span>Real-Time (Today)</span>
+                </span>
+              ) : (
+                <span className="inline-flex items-center space-x-1 bg-[#3d5a6c] text-[#8bb4cb] border border-[#749fb7]/60 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full">
+                  <Clock className="w-3 h-3 text-[#8bb4cb]" />
+                  <span>Retrospective ({selectedDateLabel})</span>
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-[#cbd5e1] font-medium pt-0.5">
+              {isSelectedToday
+                ? 'Recording sets in real time. Defaulting to today.'
+                : `Backfilling workout details retrospectively for ${selectedDateLabel}.`}
+            </p>
+          </div>
+        </div>
+
+        {/* Quick Date Switcher Chips + Date Input */}
+        <div className="flex items-center space-x-2 self-start sm:self-auto shrink-0">
+          <button
+            type="button"
+            onClick={() => setSelectedDate(todayISODate)}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition border ${
+              isSelectedToday
+                ? 'bg-[#8bb4cb] text-[#0e2938] border-[#749fb7] shadow-sm'
+                : 'bg-[#3d5a6c] text-[#cbd5e1] hover:text-white hover:bg-[#344e5e] border-[#4e7085]'
+            }`}
+          >
+            Today
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSelectedDate(yesterdayISODate)}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition border ${
+              isSelectedYesterday
+                ? 'bg-[#8bb4cb] text-[#0e2938] border-[#749fb7] shadow-sm'
+                : 'bg-[#3d5a6c] text-[#cbd5e1] hover:text-white hover:bg-[#344e5e] border-[#4e7085]'
+            }`}
+          >
+            Yesterday
+          </button>
+
+          <div className="relative">
+            <input
+              type="date"
+              max={todayISODate}
+              value={selectedDate}
+              onChange={(e) => {
+                if (e.target.value) setSelectedDate(e.target.value);
+              }}
+              className={`bg-[#3d5a6c] border text-xs font-bold px-2.5 py-1.5 rounded-xl text-white focus:outline-none focus:border-[#8bb4cb] transition cursor-pointer ${
+                !isSelectedToday && !isSelectedYesterday
+                  ? 'border-[#8bb4cb] bg-[#344e5e] ring-1 ring-[#8bb4cb]'
+                  : 'border-[#4e7085]'
+              }`}
+              title="Pick a custom past date"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Selected Date's Activity Bar (Zero Pressure Momentum) */}
+      {dateActivities.length > 0 && (
         <div className="bg-[#274a38] border border-[#3c6e54] rounded-2xl p-4 sm:p-5 shadow-sm text-white">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="space-y-1">
               <div className="inline-flex items-center space-x-1.5 text-[#8fb89e] text-xs font-extrabold uppercase tracking-wider">
                 <Zap className="w-3.5 h-3.5 text-[#8fb89e]" />
-                <span>Today's Logged Progress</span>
+                <span>
+                  {isSelectedToday
+                    ? "Today's Logged Progress"
+                    : isSelectedYesterday
+                    ? "Yesterday's Logged Progress"
+                    : `Logged Progress (${selectedDateLabel})`}
+                </span>
               </div>
               <h3 className="text-lg font-extrabold text-white">
-                {todayActivities.length} {todayActivities.length === 1 ? 'Exercise' : 'Exercises'} • {totalTodaySets} Total Sets
+                {dateActivities.length} {dateActivities.length === 1 ? 'Exercise' : 'Exercises'} • {totalDateSets} Total Sets
               </h3>
               <div className="flex flex-wrap gap-1.5 pt-1">
-                {todayActivities.map((act, i) => (
+                {dateActivities.map((act, i) => (
                   <span
                     key={i}
                     className="bg-[#1f3a2c] text-[#8fb89e] px-2.5 py-0.5 rounded-lg text-xs font-mono font-bold border border-[#2f5540]"
@@ -198,7 +302,7 @@ export const WorkoutsHub: React.FC<WorkoutsHubProps> = ({ onNavigateToRoutines }
             <div className="text-right sm:border-l sm:border-[#3c6e54] sm:pl-5">
               <span className="text-xs text-[#cbd5e1] block font-medium">Total Volume</span>
               <span className="text-xl font-mono font-extrabold text-white">
-                {Math.round(totalTodayVolume)} <span className="text-xs font-sans">kg</span>
+                {Math.round(totalDateVolume)} <span className="text-xs font-sans">kg</span>
               </span>
             </div>
           </div>
@@ -213,7 +317,7 @@ export const WorkoutsHub: React.FC<WorkoutsHubProps> = ({ onNavigateToRoutines }
               Exercise Workspace
             </h2>
             <p className="text-xs text-[#cbd5e1] font-medium">
-              Pick 1 or 2 exercises to master today at your own pace. Log sets on-demand.
+              Pick 1 or 2 exercises to master at your own pace. Log sets on-demand.
             </p>
           </div>
 
@@ -298,7 +402,7 @@ export const WorkoutsHub: React.FC<WorkoutsHubProps> = ({ onNavigateToRoutines }
             <div className="space-y-1">
               <div className="flex items-center space-x-2">
                 <span className="text-xs font-extrabold text-[#8bb4cb] uppercase tracking-wider">
-                  TODAY'S FOCUS SPLIT
+                  {isSelectedToday ? "TODAY'S FOCUS SPLIT" : 'FOCUS SPLIT'}
                 </span>
                 <span className="text-xs text-[#cbd5e1] font-mono">
                   • Cycle every {currentRoutine.target_rest_days || 3}d
@@ -388,6 +492,7 @@ export const WorkoutsHub: React.FC<WorkoutsHubProps> = ({ onNavigateToRoutines }
               routineName={ex.routineName}
               routineId={ex.routineId}
               targetSets={ex.targetSets}
+              selectedDate={selectedDate}
               onFocusRoutine={(rId) => setSelectedRoutineId(rId)}
             />
           ))}
@@ -399,6 +504,7 @@ export const WorkoutsHub: React.FC<WorkoutsHubProps> = ({ onNavigateToRoutines }
         <AddExerciseModal
           onClose={() => setShowAddModal(false)}
           defaultRoutineId={activeRoutineId !== 'all' ? activeRoutineId : undefined}
+          selectedDate={selectedDate}
         />
       )}
     </div>

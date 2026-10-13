@@ -41,7 +41,8 @@ interface WorkoutContextType {
   getLastPerformance: (exerciseName: string) => LastExercisePerformance | null;
   getTodayLoggedSetsCount: (exerciseName?: string) => number;
   getTodayActivity: () => TodayActivitySummary[];
-  markRoutineCompleted: (routineId: string) => Promise<void>;
+  getActivityForDate: (targetDate?: Date | string) => TodayActivitySummary[];
+  markRoutineCompleted: (routineId: string, completedAt?: string) => Promise<void>;
   createRoutine: (name: string, description: string, restDays: number, exercises: { name: string; muscle: string; targetSets: number }[]) => Promise<void>;
   updateRoutine: (routineId: string, name: string, description: string, restDays: number, exercises: { name: string; muscle: string; targetSets: number }[]) => Promise<void>;
   addOrUpdateExerciseToRoutine: (routineId: string, exerciseName: string, muscle: string, targetSets: number) => Promise<void>;
@@ -364,51 +365,67 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
     [sessions]
   );
 
+  // Get summary of logged activity for any specific date
+  const getActivityForDate = useCallback(
+    (targetDate?: Date | string): TodayActivitySummary[] => {
+      const d = targetDate
+        ? typeof targetDate === 'string'
+          ? new Date(targetDate.includes('T') ? targetDate : targetDate + 'T12:00:00')
+          : targetDate
+        : new Date();
+      const targetDateStr = d.toDateString();
+      const map: Record<string, TodayActivitySummary> = {};
+
+      sessions.forEach((s) => {
+        if (!s.completed_at) return;
+        if (new Date(s.completed_at).toDateString() !== targetDateStr) return;
+
+        s.logged_exercises?.forEach((le) => {
+          const name = le.exercise_name.trim();
+          if (!name) return;
+
+          const vol = le.sets.reduce((acc, st) => acc + Number(st.weight) * Number(st.reps), 0);
+          const maxW = Math.max(0, ...le.sets.map((st) => Number(st.weight)));
+
+          if (!map[name]) {
+            map[name] = {
+              exerciseName: name,
+              routineName: s.routine_name,
+              setsCount: le.sets.length,
+              maxWeight: maxW,
+              totalVolume: vol,
+              lastLoggedAt: s.completed_at!,
+            };
+          } else {
+            map[name].setsCount += le.sets.length;
+            map[name].totalVolume += vol;
+            map[name].maxWeight = Math.max(map[name].maxWeight, maxW);
+            map[name].lastLoggedAt = s.completed_at!;
+          }
+        });
+      });
+
+      return Object.values(map);
+    },
+    [sessions]
+  );
+
   // Get summary of today's logged activity
   const getTodayActivity = useCallback((): TodayActivitySummary[] => {
-    const todayStr = new Date().toDateString();
-    const map: Record<string, TodayActivitySummary> = {};
+    return getActivityForDate(new Date());
+  }, [getActivityForDate]);
 
-    sessions.forEach((s) => {
-      if (!s.completed_at) return;
-      if (new Date(s.completed_at).toDateString() !== todayStr) return;
-
-      s.logged_exercises?.forEach((le) => {
-        const name = le.exercise_name.trim();
-        if (!name) return;
-
-        const vol = le.sets.reduce((acc, st) => acc + Number(st.weight) * Number(st.reps), 0);
-        const maxW = Math.max(0, ...le.sets.map((st) => Number(st.weight)));
-
-        if (!map[name]) {
-          map[name] = {
-            exerciseName: name,
-            routineName: s.routine_name,
-            setsCount: le.sets.length,
-            maxWeight: maxW,
-            totalVolume: vol,
-            lastLoggedAt: s.completed_at!,
-          };
-        } else {
-          map[name].setsCount += le.sets.length;
-          map[name].totalVolume += vol;
-          map[name].maxWeight = Math.max(map[name].maxWeight, maxW);
-          map[name].lastLoggedAt = s.completed_at!;
-        }
-      });
-    });
-
-    return Object.values(map);
-  }, [sessions]);
-
-  // Log exercise sets directly (free-flowing on-demand logging)
+  // Log exercise sets directly (supports both real-time and retrospective logging)
   const logExerciseSets = async (payload: LogExercisePayload) => {
     const validSets = payload.sets.filter((s) => s.weight > 0 || s.reps > 0);
     if (validSets.length === 0) return;
 
-    const timestamp = payload.loggedAt || new Date().toISOString();
-
     if (!user) return;
+
+    const timestamp = payload.loggedAt || new Date().toISOString();
+    const targetDate = new Date(timestamp);
+    const startOfDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate(), 0, 0, 0, 0).toISOString();
+    const endOfDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate(), 23, 59, 59, 999).toISOString();
 
     try {
       // 1. Ensure exercise exists in DB
@@ -439,14 +456,13 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
       }
 
-      // 2. Create or find today's session
-      // Query if a session exists today
-      const todayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+      // 2. Create or find session for the specific target date
       const { data: existingSessions } = await supabase
         .from('workout_sessions')
-        .select('id, routine_id, routine_name')
+        .select('id, routine_id, routine_name, completed_at')
         .eq('user_id', user.id)
-        .gte('completed_at', todayStart)
+        .gte('completed_at', startOfDay)
+        .lte('completed_at', endOfDay)
         .order('completed_at', { ascending: false })
         .limit(1);
 
@@ -458,7 +474,7 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
           .insert({
             user_id: user.id,
             routine_id: payload.routineId || null,
-            routine_name: payload.routineName || 'Daily Workout',
+            routine_name: payload.routineName || 'Logged Workout',
             started_at: timestamp,
             completed_at: timestamp,
           })
@@ -496,10 +512,16 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       // 4. Update routine last_completed_at if routineId
       if (payload.routineId) {
-        await supabase
-          .from('routines')
-          .update({ last_completed_at: timestamp })
-          .eq('id', payload.routineId);
+        const targetRoutine = routines.find((r) => r.id === payload.routineId);
+        const shouldUpdateRoutine = !targetRoutine?.last_completed_at ||
+          new Date(timestamp) >= new Date(targetRoutine.last_completed_at);
+
+        if (shouldUpdateRoutine) {
+          await supabase
+            .from('routines')
+            .update({ last_completed_at: timestamp })
+            .eq('id', payload.routineId);
+        }
       }
 
       await fetchData();
@@ -511,13 +533,20 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  // Mark a routine as completed for rotation
-  const markRoutineCompleted = async (routineId: string) => {
+  // Mark a routine as completed for rotation (supports custom date timestamp)
+  const markRoutineCompleted = async (routineId: string, completedAt?: string) => {
     if (!user) return;
-    const timestamp = new Date().toISOString();
+    const timestamp = completedAt || new Date().toISOString();
 
     try {
-      await supabase.from('routines').update({ last_completed_at: timestamp }).eq('id', routineId);
+      const targetRoutine = routines.find((r) => r.id === routineId);
+      const shouldUpdateRoutine =
+        !targetRoutine?.last_completed_at ||
+        new Date(timestamp) >= new Date(targetRoutine.last_completed_at);
+
+      if (shouldUpdateRoutine) {
+        await supabase.from('routines').update({ last_completed_at: timestamp }).eq('id', routineId);
+      }
       await fetchData();
     } catch (err) {
       console.error('Error marking routine completed:', err);
@@ -793,6 +822,7 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
         getLastPerformance,
         getTodayLoggedSetsCount,
         getTodayActivity,
+        getActivityForDate,
         markRoutineCompleted,
         createRoutine,
         updateRoutine,
