@@ -1,13 +1,9 @@
 import React from 'react';
-import { Dumbbell, LogIn, LogOut, User as UserIcon, Sparkles } from 'lucide-react';
+import { Dumbbell, LogOut, User as UserIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
-interface HeaderProps {
-  onOpenAuth: () => void;
-}
-
-export const Header: React.FC<HeaderProps> = ({ onOpenAuth }) => {
-  const { user, isDemoMode, signOut } = useAuth();
+export const Header: React.FC = () => {
+  const { user, signOut } = useAuth();
 
   return (
     <header className="sticky top-0 z-40 bg-[#223541] border-b border-[#182731] px-4 py-3 sm:px-6 shadow-sm text-white">
@@ -31,45 +27,24 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAuth }) => {
         </div>
 
         {/* User / Session State */}
-        <div className="flex items-center space-x-2.5">
-          {isDemoMode ? (
-            <div className="flex items-center space-x-2 bg-[#1b2b35] border border-[#132028] px-2.5 py-1 rounded-lg">
-              <Sparkles className="w-3.5 h-3.5 text-[#c9bda9]" />
-              <span className="text-xs font-semibold text-white">Local Mode</span>
-              <button
-                onClick={onOpenAuth}
-                className="ml-1 text-xs text-[#8bb4cb] underline hover:text-white font-bold"
-              >
-                Sign In
-              </button>
+        {user && (
+          <div className="flex items-center space-x-2.5">
+            <div className="hidden sm:flex items-center space-x-2 bg-[#1b2b35] px-3 py-1.5 rounded-lg border border-[#132028]">
+              <UserIcon className="w-3.5 h-3.5 text-[#94a3b8]" />
+              <span className="text-xs text-white font-medium truncate max-w-[200px]">
+                {user.email}
+              </span>
             </div>
-          ) : user ? (
-            <div className="flex items-center space-x-2.5">
-              <div className="hidden sm:flex items-center space-x-2 bg-[#1b2b35] px-3 py-1.5 rounded-lg border border-[#132028]">
-                <UserIcon className="w-3.5 h-3.5 text-[#94a3b8]" />
-                <span className="text-xs text-white font-medium truncate max-w-[160px]">
-                  {user.email}
-                </span>
-              </div>
-              <button
-                onClick={() => signOut()}
-                className="flex items-center space-x-1.5 bg-[#1b2b35] hover:bg-[#132028] text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition border border-[#132028]"
-                title="Sign Out"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Sign Out</span>
-              </button>
-            </div>
-          ) : (
             <button
-              onClick={onOpenAuth}
-              className="flex items-center space-x-1.5 bg-[#8bb4cb] hover:bg-[#749fb7] text-[#0e2938] px-3.5 py-1.5 rounded-lg text-xs font-bold transition border border-[#749fb7]"
+              onClick={() => signOut()}
+              className="flex items-center space-x-1.5 bg-[#1b2b35] hover:bg-[#132028] text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition border border-[#132028]"
+              title="Sign Out"
             >
-              <LogIn className="w-3.5 h-3.5" />
-              <span>Sign In</span>
+              <LogOut className="w-3.5 h-3.5 text-[#cc8d8d]" />
+              <span>Sign Out</span>
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </header>
   );

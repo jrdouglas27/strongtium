@@ -6,12 +6,10 @@ interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
-  isDemoMode: boolean;
   signInWithEmail: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUpWithEmail: (email: string, password: string) => Promise<{ error: Error | null }>;
   signInWithOtp: (email: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
-  enableDemoMode: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -20,29 +18,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isDemoMode, setIsDemoMode] = useState<boolean>(() => {
-    return localStorage.getItem('strongtium_demo_mode') === 'true';
-  });
 
   useEffect(() => {
-    // 1. Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    }).catch((err) => {
-      console.warn('Supabase auth getSession warning:', err);
-      setLoading(false);
-    });
+    // Purge any legacy demo mode storage
+    localStorage.removeItem('strongtium_demo_mode');
 
-    // 2. Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    // 1. Get initial session
+    supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => {
+        setSession(session);
+        setUser(session?.user ?? null);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.warn('Supabase auth getSession warning:', err);
+        setLoading(false);
+      });
+
+    // 2. Listen for auth state changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
-      if (session) {
-        setIsDemoMode(false);
-        localStorage.removeItem('strongtium_demo_mode');
-      }
       setLoading(false);
     });
 
@@ -79,23 +78,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signOut = async () => {
     await supabase.auth.signOut();
-    setIsDemoMode(false);
-    localStorage.removeItem('strongtium_demo_mode');
     setUser(null);
     setSession(null);
-  };
-
-  const enableDemoMode = () => {
-    setIsDemoMode(true);
-    localStorage.setItem('strongtium_demo_mode', 'true');
-    setUser({
-      id: 'demo-user-123',
-      email: 'demo@strongtium.local',
-      app_metadata: {},
-      user_metadata: { name: 'Demo Athlete' },
-      aud: 'authenticated',
-      created_at: new Date().toISOString(),
-    } as User);
   };
 
   return (
@@ -104,12 +88,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         session,
         loading,
-        isDemoMode,
         signInWithEmail,
         signUpWithEmail,
         signInWithOtp,
         signOut,
-        enableDemoMode,
       }}
     >
       {children}

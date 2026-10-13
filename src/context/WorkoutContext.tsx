@@ -58,7 +58,7 @@ const LOCAL_STORAGE_ROUTINES = 'strongtium_routines';
 const LOCAL_STORAGE_SESSIONS = 'strongtium_sessions';
 
 export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, isDemoMode } = useAuth();
+  const { user } = useAuth();
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [sessions, setSessions] = useState<WorkoutSession[]>([]);
   const [personalRecords, setPersonalRecords] = useState<Record<string, PersonalRecord>>({});
@@ -122,29 +122,10 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const fetchData = useCallback(async () => {
     setLoading(true);
 
-    if (isDemoMode || !user) {
-      // Local storage fallback for demo
-      const savedRoutines = localStorage.getItem(LOCAL_STORAGE_ROUTINES);
-      const savedSessions = localStorage.getItem(LOCAL_STORAGE_SESSIONS);
-
-      let rList: Routine[] = savedRoutines ? JSON.parse(savedRoutines) : [];
-      let sList: WorkoutSession[] = savedSessions ? JSON.parse(savedSessions) : [];
-
-      if (rList.length === 0) {
-        // Initialize starter data in demo mode
-        rList = STARTER_ROUTINES.map((r, idx) => ({
-          ...r,
-          id: `demo-routine-${idx + 1}`,
-          user_id: 'demo-user',
-          created_at: new Date().toISOString(),
-          last_completed_at: idx === 0 ? new Date(Date.now() - 4 * 86400000).toISOString() : null, // Push is overdue
-        }));
-        localStorage.setItem(LOCAL_STORAGE_ROUTINES, JSON.stringify(rList));
-      }
-
-      setRoutines(rList);
-      setSessions(sList);
-      computePRs(sList);
+    if (!user) {
+      setRoutines([]);
+      setSessions([]);
+      setPersonalRecords({});
       setLoading(false);
       return;
     }
@@ -275,7 +256,7 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } finally {
       setLoading(false);
     }
-  }, [user, isDemoMode, computePRs]);
+  }, [user, computePRs]);
 
   useEffect(() => {
     fetchData();
@@ -426,99 +407,8 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (validSets.length === 0) return;
 
     const timestamp = payload.loggedAt || new Date().toISOString();
-    const todayStr = new Date(timestamp).toDateString();
 
-    if (isDemoMode || !user) {
-      // Find today's session or create one
-      const existingSessionIndex = sessions.findIndex(
-        (s) => s.completed_at && new Date(s.completed_at).toDateString() === todayStr
-      );
-
-      let updatedSessions = [...sessions];
-      const newLoggedEx = {
-        id: `le-${Date.now()}`,
-        session_id: '',
-        exercise_id: payload.exerciseId,
-        exercise_name: payload.exerciseName,
-        exercise_notes: payload.exerciseNotes,
-        order_index: 0,
-        sets: validSets.map((s, idx) => ({
-          id: `set-${Date.now()}-${idx + 1}`,
-          logged_exercise_id: `le-${Date.now()}`,
-          set_number: s.setNumber || idx + 1,
-          weight: Number(s.weight) || 0,
-          reps: Number(s.reps) || 0,
-          created_at: timestamp,
-        })),
-      };
-
-      if (existingSessionIndex >= 0) {
-        const existingSession = { ...updatedSessions[existingSessionIndex] };
-        newLoggedEx.session_id = existingSession.id;
-        newLoggedEx.order_index = (existingSession.logged_exercises?.length || 0);
-
-        // Replace or append logged exercise
-        const existingExIdx = existingSession.logged_exercises?.findIndex(
-          (e) => e.exercise_name.trim().toLowerCase() === payload.exerciseName.trim().toLowerCase()
-        );
-
-        let updatedLoggedExercises = [...(existingSession.logged_exercises || [])];
-        if (existingExIdx !== undefined && existingExIdx >= 0) {
-          // Update sets and notes for this exercise today
-          updatedLoggedExercises[existingExIdx] = {
-            ...updatedLoggedExercises[existingExIdx],
-            exercise_notes: payload.exerciseNotes || updatedLoggedExercises[existingExIdx].exercise_notes,
-            sets: validSets.map((s, idx) => ({
-              id: `set-${Date.now()}-${idx + 1}`,
-              logged_exercise_id: updatedLoggedExercises[existingExIdx].id,
-              set_number: s.setNumber || idx + 1,
-              weight: Number(s.weight) || 0,
-              reps: Number(s.reps) || 0,
-              created_at: timestamp,
-            })),
-          };
-        } else {
-          updatedLoggedExercises.push(newLoggedEx);
-        }
-
-        existingSession.logged_exercises = updatedLoggedExercises;
-        existingSession.completed_at = timestamp;
-        if (payload.routineName && (!existingSession.routine_name || existingSession.routine_name === 'Daily Workout')) {
-          existingSession.routine_name = payload.routineName;
-          existingSession.routine_id = payload.routineId;
-        }
-
-        updatedSessions[existingSessionIndex] = existingSession;
-      } else {
-        const newSession: WorkoutSession = {
-          id: `session-${Date.now()}`,
-          user_id: user?.id || 'demo-user',
-          routine_id: payload.routineId,
-          routine_name: payload.routineName || 'Daily Workout',
-          started_at: timestamp,
-          completed_at: timestamp,
-          session_notes: '',
-          logged_exercises: [newLoggedEx],
-        };
-        newLoggedEx.session_id = newSession.id;
-        updatedSessions = [newSession, ...updatedSessions];
-      }
-
-      setSessions(updatedSessions);
-      localStorage.setItem(LOCAL_STORAGE_SESSIONS, JSON.stringify(updatedSessions));
-
-      // Update routine last_completed_at if routineId provided
-      if (payload.routineId) {
-        const updatedRoutines = routines.map((r) =>
-          r.id === payload.routineId ? { ...r, last_completed_at: timestamp } : r
-        );
-        setRoutines(updatedRoutines);
-        localStorage.setItem(LOCAL_STORAGE_ROUTINES, JSON.stringify(updatedRoutines));
-      }
-
-      computePRs(updatedSessions);
-      return;
-    }
+    if (!user) return;
 
     try {
       // 1. Ensure exercise exists in DB
@@ -623,15 +513,8 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Mark a routine as completed for rotation
   const markRoutineCompleted = async (routineId: string) => {
+    if (!user) return;
     const timestamp = new Date().toISOString();
-    if (isDemoMode || !user) {
-      const updatedRoutines = routines.map((r) =>
-        r.id === routineId ? { ...r, last_completed_at: timestamp } : r
-      );
-      setRoutines(updatedRoutines);
-      localStorage.setItem(LOCAL_STORAGE_ROUTINES, JSON.stringify(updatedRoutines));
-      return;
-    }
 
     try {
       await supabase.from('routines').update({ last_completed_at: timestamp }).eq('id', routineId);
@@ -648,37 +531,7 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
     restDays: number,
     exerciseInputs: { name: string; muscle: string; targetSets: number }[]
   ) => {
-    if (isDemoMode || !user) {
-      const newRoutine: Routine = {
-        id: `custom-routine-${Date.now()}`,
-        user_id: 'demo-user',
-        name,
-        description,
-        target_rest_days: restDays,
-        order_index: routines.length,
-        created_at: new Date().toISOString(),
-        exercises: exerciseInputs.map((e, idx) => ({
-          id: `re-${Date.now()}-${idx}`,
-          routine_id: `custom-routine-${Date.now()}`,
-          exercise_id: `ex-${Date.now()}-${idx}`,
-          target_sets: e.targetSets,
-          order_index: idx,
-          exercise: {
-            id: `ex-${Date.now()}-${idx}`,
-            user_id: 'demo-user',
-            name: e.name,
-            target_muscle_group: e.muscle,
-            default_unit: 'kg',
-            created_at: new Date().toISOString(),
-          },
-        })),
-      };
-
-      const updated = [...routines, newRoutine];
-      setRoutines(updated);
-      localStorage.setItem(LOCAL_STORAGE_ROUTINES, JSON.stringify(updated));
-      return;
-    }
+    if (!user) return;
 
     try {
       const { data: routineData, error: routineErr } = await supabase
@@ -745,36 +598,7 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
     restDays: number,
     exerciseInputs: { name: string; muscle: string; targetSets: number }[]
   ) => {
-    if (isDemoMode || !user) {
-      const updated = routines.map((r) => {
-        if (r.id !== routineId) return r;
-        return {
-          ...r,
-          name,
-          description,
-          target_rest_days: restDays,
-          exercises: exerciseInputs.map((e, idx) => ({
-            id: `re-${Date.now()}-${idx}`,
-            routine_id: routineId,
-            exercise_id: `ex-${Date.now()}-${idx}`,
-            target_sets: e.targetSets,
-            order_index: idx,
-            exercise: {
-              id: `ex-${Date.now()}-${idx}`,
-              user_id: 'demo-user',
-              name: e.name,
-              target_muscle_group: e.muscle,
-              default_unit: 'kg' as const,
-              created_at: new Date().toISOString(),
-            },
-          })),
-        };
-      });
-
-      setRoutines(updated);
-      localStorage.setItem(LOCAL_STORAGE_ROUTINES, JSON.stringify(updated));
-      return;
-    }
+    if (!user) return;
 
     try {
       // 1. Update Routine details
@@ -934,12 +758,7 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Delete Routine
   const deleteRoutine = async (routineId: string) => {
-    if (isDemoMode || !user) {
-      const updated = routines.filter((r) => r.id !== routineId);
-      setRoutines(updated);
-      localStorage.setItem(LOCAL_STORAGE_ROUTINES, JSON.stringify(updated));
-      return;
-    }
+    if (!user) return;
 
     try {
       await supabase.from('routines').delete().eq('id', routineId);
@@ -951,6 +770,7 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Load starter routines for new user
   const loadStarterRoutines = async () => {
+    if (!user) return;
     for (const starter of STARTER_ROUTINES) {
       const exerciseList = (starter.exercises || []).map((e) => ({
         name: e.exercise?.name || 'Exercise',
