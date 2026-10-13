@@ -39,6 +39,7 @@ import {
   formatRelativeDays,
   calculateRoutineDueStatus,
 } from '../lib/calculations';
+import { ConsistencyHeatmap } from './ConsistencyHeatmap';
 
 interface HomeDashboardProps {
   onNavigate: (tab: TabType) => void;
@@ -691,6 +692,9 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
           </button>
         </div>
       </div>
+
+      {/* Consistency Heatmap Card */}
+      <ConsistencyHeatmap title="Consistency Activity Heatmap" defaultRange="180d" />
 
       {/* Lower Row: Recent PR Trophies + Last Workout Session Recap */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

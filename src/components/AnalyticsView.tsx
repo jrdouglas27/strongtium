@@ -12,13 +12,13 @@ import {
 import {
   TrendingUp,
   Award,
-  Calendar,
   Zap,
   Activity,
   ChevronDown,
 } from 'lucide-react';
 import { useWorkout } from '../context/WorkoutContext';
 import { calculate1RM, formatDate } from '../lib/calculations';
+import { ConsistencyHeatmap } from './ConsistencyHeatmap';
 
 export const AnalyticsView: React.FC = () => {
   const { sessions, personalRecords } = useWorkout();
@@ -105,30 +105,6 @@ export const AnalyticsView: React.FC = () => {
     return points;
   }, [sessions, selectedExercise]);
 
-  const heatmapDays = useMemo(() => {
-    const days = [];
-    const today = new Date();
-    const sessionDates = new Set(
-      sessions
-        .filter((s) => s.completed_at)
-        .map((s) => new Date(s.completed_at!).toISOString().split('T')[0])
-    );
-
-    for (let i = 59; i >= 0; i--) {
-      const d = new Date(today);
-      d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
-      const hasWorkout = sessionDates.has(dateStr);
-
-      days.push({
-        date: dateStr,
-        displayDate: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-        hasWorkout,
-      });
-    }
-    return days;
-  }, [sessions]);
-
   const totalWorkouts = sessions.filter((s) => s.completed_at).length;
 
   return (
@@ -170,34 +146,8 @@ export const AnalyticsView: React.FC = () => {
         </div>
       </div>
 
-      {/* Consistency Heatmap */}
-      <div className="bg-[#3d5a6c] border border-[#4e7085] rounded-2xl p-5 shadow-sm">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center space-x-2">
-            <Calendar className="w-4 h-4 text-[#8bb4cb]" />
-            <h3 className="text-sm font-bold text-white tracking-tight">
-              Consistency Activity (Last 60 Days)
-            </h3>
-          </div>
-          <span className="text-xs text-[#cbd5e1] font-mono font-medium">
-            {heatmapDays.filter((d) => d.hasWorkout).length} active days
-          </span>
-        </div>
-
-        <div className="grid grid-flow-col grid-rows-6 gap-1.5 overflow-x-auto py-1">
-          {heatmapDays.map((day, idx) => (
-            <div
-              key={idx}
-              title={`${day.displayDate}: ${day.hasWorkout ? 'Workout Completed' : 'Rest Day'}`}
-              className={`w-3.5 h-3.5 rounded-sm border ${
-                day.hasWorkout
-                  ? 'bg-[#8bb4cb] border-[#749fb7]'
-                  : 'bg-[#2d4554] border-[#3f5d70]'
-              }`}
-            />
-          ))}
-        </div>
-      </div>
+      {/* GitHub-Style Squished Consistency Heatmap */}
+      <ConsistencyHeatmap title="Consistency Activity" defaultRange="180d" />
 
       {/* Main Exercise Progression Chart */}
       <div className="bg-[#3d5a6c] border border-[#4e7085] rounded-2xl p-5 shadow-sm">
