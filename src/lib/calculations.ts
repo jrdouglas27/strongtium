@@ -158,3 +158,42 @@ export function isSameDate(d1: Date | string, d2: Date | string): boolean {
   return date1.toDateString() === date2.toDateString();
 }
 
+/**
+ * Strips side indicators (e.g. "(Left Arm)", "(Right Leg)") to return the base exercise name
+ */
+export function getBaseExerciseName(name: string): string {
+  if (!name) return '';
+  return name.replace(/\s*\((Left|Right)(\s+(Arm|Leg|Side))?\)/i, '').trim();
+}
+
+/**
+ * Detects if an exercise name indicates a unilateral movement (Left or Right side)
+ */
+export function isUnilateralExercise(name: string): {
+  isUnilateral: boolean;
+  side: 'left' | 'right' | null;
+  label: string | null;
+} {
+  if (!name) return { isUnilateral: false, side: null, label: null };
+  const match = name.match(/\((Left|Right)(\s+(Arm|Leg|Side))?\)/i);
+  if (!match) return { isUnilateral: false, side: null, label: null };
+  const side = match[1].toLowerCase() as 'left' | 'right';
+  const limb = match[3] ? match[3] : 'Side';
+  return {
+    isUnilateral: true,
+    side,
+    label: `${match[1].toUpperCase()} ${limb.toUpperCase()}`,
+  };
+}
+
+/**
+ * Determines whether a muscle group typically splits by Arm or Leg
+ */
+export function getLimbTypeForMuscle(muscle: string): 'Arm' | 'Leg' {
+  const lower = (muscle || '').toLowerCase();
+  const legMuscles = ['quad', 'hamstring', 'calf', 'calves', 'shin', 'feet', 'ankle', 'glute', 'leg'];
+  const isLeg = legMuscles.some((m) => lower.includes(m));
+  return isLeg ? 'Leg' : 'Arm';
+}
+
+

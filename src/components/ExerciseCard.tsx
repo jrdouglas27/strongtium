@@ -19,6 +19,8 @@ import {
   formatDate,
   toLocalISODate,
   formatWorkoutDateLabel,
+  getBaseExerciseName,
+  isUnilateralExercise,
 } from '../lib/calculations';
 
 interface ExerciseCardProps {
@@ -52,11 +54,26 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
     logExerciseSets,
     getExerciseHistory,
     sessions,
+    splitExerciseInRoutine,
   } = useWorkout();
 
+  const unilateral = isUnilateralExercise(exerciseName);
   const lastPerf = getLastPerformance(exerciseName);
-  const pr = personalRecords[exerciseName.trim()];
+  const pr = personalRecords[exerciseName.trim()] || personalRecords[getBaseExerciseName(exerciseName)];
   const history = getExerciseHistory(exerciseName);
+  const [isSplitting, setIsSplitting] = useState(false);
+
+  const handleSplitSides = async () => {
+    if (!routineId || isSplitting) return;
+    setIsSplitting(true);
+    try {
+      await splitExerciseInRoutine(routineId, exerciseName);
+    } catch (err) {
+      console.error('Failed to split exercise:', err);
+    } finally {
+      setIsSplitting(false);
+    }
+  };
 
   // Date context: defaults to local today if not specified
   const activeDate = selectedDate || toLocalISODate();
@@ -251,6 +268,29 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
               <span className="text-[10px] text-[#94a3b8] font-mono font-medium">
                 {targetSets} Target Sets
               </span>
+            )}
+            {unilateral.isUnilateral && (
+              <span
+                className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border flex items-center space-x-1 uppercase tracking-wider ${
+                  unilateral.side === 'left'
+                    ? 'bg-[#183446] text-[#8bb4cb] border-[#2e5d7d]'
+                    : 'bg-[#1a3826] text-[#8fb89e] border-[#2d5d3f]'
+                }`}
+              >
+                <span>{unilateral.label}</span>
+              </span>
+            )}
+            {routineId && !unilateral.isUnilateral && (
+              <button
+                type="button"
+                onClick={handleSplitSides}
+                disabled={isSplitting}
+                className="inline-flex items-center space-x-1 text-[10px] text-[#cbd5e1] hover:text-white bg-[#2d4554] hover:bg-[#253946] border border-[#3f5d70] px-2 py-0.5 rounded-md transition font-bold"
+                title="Split this exercise into separate Left and Right side entries in your routine"
+              >
+                <Sparkles className="w-2.5 h-2.5 text-[#8bb4cb]" />
+                <span>{isSplitting ? 'Splitting...' : 'Split L/R'}</span>
+              </button>
             )}
           </div>
 

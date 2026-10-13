@@ -8,7 +8,7 @@ import {
   LastExercisePerformance,
   LogExercisePayload,
 } from '../types/workout';
-import { calculate1RM } from '../lib/calculations';
+import { calculate1RM, getBaseExerciseName, getLimbTypeForMuscle } from '../lib/calculations';
 import { STARTER_ROUTINES } from '../lib/starterData';
 
 export interface ExerciseHistoryEntry {
@@ -47,6 +47,7 @@ interface WorkoutContextType {
   updateRoutine: (routineId: string, name: string, description: string, restDays: number, exercises: { name: string; muscle: string; targetSets: number }[]) => Promise<void>;
   addOrUpdateExerciseToRoutine: (routineId: string, exerciseName: string, muscle: string, targetSets: number) => Promise<void>;
   removeExerciseFromRoutine: (routineId: string, exerciseIndex: number) => Promise<void>;
+  splitExerciseInRoutine: (routineId: string, exerciseName: string) => Promise<void>;
   bulkSaveRoutines: (newRoutines: { name: string; description?: string; targetRestDays: number; exercises: { name: string; muscle: string; targetSets: number }[] }[]) => Promise<void>;
   deleteRoutine: (routineId: string) => Promise<void>;
   loadStarterRoutines: () => Promise<void>;
@@ -240,6 +241,82 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
           })),
       }));
 
+      // Auto-migrate: If any routine contains unsplit bicep curls, upgrade to Left & Right arm
+      let needsRefetch = false;
+      for (const r of formattedRoutines) {
+        const hasUnsplitBicep = (r.exercises || []).some((re: any) => {
+          const n = re.exercise?.name?.trim().toLowerCase();
+          return n === 'dumbbell bicep curls' || n === 'bicep curls';
+        });
+
+        if (hasUnsplitBicep && user) {
+          const updatedExercises: { name: string; muscle: string; targetSets: number }[] = [];
+          for (const re of (r.exercises || [])) {
+            const n = re.exercise?.name?.trim().toLowerCase();
+            if (n === 'dumbbell bicep curls' || n === 'bicep curls') {
+              updatedExercises.push({
+                name: 'Dumbbell Bicep Curls (Left Arm)',
+                muscle: 'Biceps',
+                targetSets: re.target_sets || 3,
+              });
+              updatedExercises.push({
+                name: 'Dumbbell Bicep Curls (Right Arm)',
+                muscle: 'Biceps',
+                targetSets: re.target_sets || 3,
+              });
+            } else {
+              updatedExercises.push({
+                name: re.exercise?.name || 'Exercise',
+                muscle: re.exercise?.target_muscle_group || 'General',
+                targetSets: re.target_sets || 3,
+              });
+            }
+          }
+
+          await supabase.from('routine_exercises').delete().eq('routine_id', r.id);
+          for (let i = 0; i < updatedExercises.length; i++) {
+            const item = updatedExercises[i];
+            let exId = '';
+            const { data: existingEx } = await supabase
+              .from('exercises')
+              .select('id')
+              .eq('user_id', user.id)
+              .ilike('name', item.name.trim())
+              .maybeSingle();
+
+            if (existingEx) {
+              exId = existingEx.id;
+            } else {
+              const { data: newEx } = await supabase
+                .from('exercises')
+                .insert({
+                  user_id: user.id,
+                  name: item.name.trim(),
+                  target_muscle_group: item.muscle,
+                  default_unit: 'kg',
+                })
+                .select()
+                .single();
+              if (newEx) exId = newEx.id;
+            }
+
+            if (exId) {
+              await supabase.from('routine_exercises').insert({
+                routine_id: r.id,
+                exercise_id: exId,
+                target_sets: item.targetSets,
+                order_index: i,
+              });
+            }
+          }
+          needsRefetch = true;
+        }
+      }
+
+      if (needsRefetch) {
+        return fetchData();
+      }
+
       setRoutines(formattedRoutines);
       setSessions(formattedSessions);
       computePRs(formattedSessions);
@@ -295,6 +372,38 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
           };
         }
       }
+
+      // 2. If no performance found and this is a unilateral exercise, fall back to base name
+      const baseName = getBaseExerciseName(exerciseName).toLowerCase();
+      if (baseName && baseName !== cleanName) {
+        for (const session of sessions) {
+          if (!session.completed_at) continue;
+          const matchingEx = session.logged_exercises?.find(
+            (le) => le.exercise_name.trim().toLowerCase() === baseName
+          );
+
+          if (matchingEx && matchingEx.sets.length > 0) {
+            const sets = matchingEx.sets.map((s) => ({
+              set_number: s.set_number,
+              weight: Number(s.weight),
+              reps: Number(s.reps),
+            }));
+
+            const maxWeight = Math.max(...sets.map((s) => s.weight));
+            const best1RM = Math.max(...sets.map((s) => calculate1RM(s.weight, s.reps)));
+
+            return {
+              exercise_name: matchingEx.exercise_name,
+              last_performed_at: session.completed_at,
+              notes: matchingEx.exercise_notes,
+              sets,
+              best_estimated_1rm: best1RM,
+              max_weight: maxWeight,
+            };
+          }
+        }
+      }
+
       return null;
     },
     [sessions]
@@ -753,6 +862,48 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
     );
   };
 
+  // Split an exercise into separate Left & Right side entries inside a routine
+  const splitExerciseInRoutine = async (routineId: string, exerciseName: string) => {
+    const routine = routines.find((r) => r.id === routineId);
+    if (!routine || !routine.exercises) return;
+
+    const targetRe = routine.exercises.find(
+      (re) => re.exercise?.name?.trim().toLowerCase() === exerciseName.trim().toLowerCase()
+    );
+    if (!targetRe) return;
+
+    const muscle = targetRe.exercise?.target_muscle_group || 'General';
+    const targetSets = targetRe.target_sets || 3;
+    const limbType = getLimbTypeForMuscle(muscle);
+    const baseName = getBaseExerciseName(exerciseName);
+
+    const leftName = `${baseName} (Left ${limbType})`;
+    const rightName = `${baseName} (Right ${limbType})`;
+
+    const updatedExercises: { name: string; muscle: string; targetSets: number }[] = [];
+    for (const re of routine.exercises) {
+      const curName = re.exercise?.name || 'Exercise';
+      if (curName.trim().toLowerCase() === exerciseName.trim().toLowerCase()) {
+        updatedExercises.push({ name: leftName, muscle, targetSets });
+        updatedExercises.push({ name: rightName, muscle, targetSets });
+      } else {
+        updatedExercises.push({
+          name: curName,
+          muscle: re.exercise?.target_muscle_group || 'General',
+          targetSets: re.target_sets || 3,
+        });
+      }
+    }
+
+    await updateRoutine(
+      routine.id,
+      routine.name,
+      routine.description || '',
+      routine.target_rest_days || 3,
+      updatedExercises
+    );
+  };
+
   // Bulk save / replace routines
   const bulkSaveRoutines = async (
     newRoutines: {
@@ -828,6 +979,7 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
         updateRoutine,
         addOrUpdateExerciseToRoutine,
         removeExerciseFromRoutine,
+        splitExerciseInRoutine,
         bulkSaveRoutines,
         deleteRoutine,
         loadStarterRoutines,

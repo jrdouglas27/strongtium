@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { X, Dumbbell, Plus, Calendar } from 'lucide-react';
 import { useWorkout } from '../context/WorkoutContext';
 import { MUSCLE_GROUPS } from '../types/workout';
-import { toLocalISODate, formatWorkoutDateLabel } from '../lib/calculations';
+import { toLocalISODate, formatWorkoutDateLabel, getLimbTypeForMuscle } from '../lib/calculations';
 
 interface AddExerciseModalProps {
   onClose: () => void;
@@ -22,6 +22,7 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
   const [targetSets, setTargetSets] = useState(3);
   const [initialWeight, setInitialWeight] = useState<number | ''>('');
   const [initialReps, setInitialReps] = useState<number | ''>('');
+  const [splitSides, setSplitSides] = useState(false);
   const [logNow, setLogNow] = useState(false);
   const [logDate, setLogDate] = useState<string>(selectedDate || toLocalISODate());
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -46,35 +47,41 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
         loggedAt = targetDate.toISOString();
       }
 
-      if (logNow && (Number(initialWeight) > 0 || Number(initialReps) > 0)) {
-        await logExerciseSets({
-          exerciseName: name.trim(),
-          targetMuscleGroup: muscle,
-          routineId: routineId || undefined,
-          routineName: selectedRoutine?.name || undefined,
-          loggedAt,
-          sets: Array.from({ length: targetSets }, (_, i) => ({
-            setNumber: i + 1,
-            weight: Number(initialWeight) || 0,
-            reps: Number(initialReps) || 0,
-          })),
-        });
-      } else {
-        // Just log a blank initial set or placeholder to establish identity
-        await logExerciseSets({
-          exerciseName: name.trim(),
-          targetMuscleGroup: muscle,
-          routineId: routineId || undefined,
-          routineName: selectedRoutine?.name || undefined,
-          loggedAt,
-          sets: [
-            {
-              setNumber: 1,
+      const limbType = getLimbTypeForMuscle(muscle);
+      const namesToCreate = splitSides
+        ? [`${name.trim()} (Left ${limbType})`, `${name.trim()} (Right ${limbType})`]
+        : [name.trim()];
+
+      for (const exName of namesToCreate) {
+        if (logNow && (Number(initialWeight) > 0 || Number(initialReps) > 0)) {
+          await logExerciseSets({
+            exerciseName: exName,
+            targetMuscleGroup: muscle,
+            routineId: routineId || undefined,
+            routineName: selectedRoutine?.name || undefined,
+            loggedAt,
+            sets: Array.from({ length: targetSets }, (_, i) => ({
+              setNumber: i + 1,
               weight: Number(initialWeight) || 0,
               reps: Number(initialReps) || 0,
-            },
-          ],
-        });
+            })),
+          });
+        } else {
+          await logExerciseSets({
+            exerciseName: exName,
+            targetMuscleGroup: muscle,
+            routineId: routineId || undefined,
+            routineName: selectedRoutine?.name || undefined,
+            loggedAt,
+            sets: [
+              {
+                setNumber: 1,
+                weight: Number(initialWeight) || 0,
+                reps: Number(initialReps) || 0,
+              },
+            ],
+          });
+        }
       }
       onClose();
     } catch (err) {
@@ -149,6 +156,19 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
                 ))}
               </select>
             </div>
+          </div>
+
+          <div className="flex items-center justify-between bg-[#2d4554] border border-[#3f5d70] rounded-xl p-3">
+            <div>
+              <label className="text-xs font-bold text-white block">Unilateral (Left & Right Sides)</label>
+              <span className="text-[10px] text-[#cbd5e1]">Creates separate entries so you can log both arms or legs</span>
+            </div>
+            <input
+              type="checkbox"
+              checked={splitSides}
+              onChange={(e) => setSplitSides(e.target.checked)}
+              className="w-4 h-4 rounded text-[#8bb4cb] focus:ring-0 cursor-pointer"
+            />
           </div>
 
           <div className="bg-[#2d4554] border border-[#3f5d70] rounded-xl p-3 space-y-2.5">
