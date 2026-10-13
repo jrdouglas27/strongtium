@@ -21,6 +21,7 @@ import {
   toLocalISODate,
   getYesterdayISODate,
   formatWorkoutDateLabel,
+  getBaseExerciseName,
 } from '../lib/calculations';
 
 interface WorkoutsHubProps {
@@ -97,29 +98,37 @@ export const WorkoutsHub: React.FC<WorkoutsHubProps> = ({ onNavigateToRoutines }
     // 1. Add from routines
     routines.forEach((r) => {
       r.exercises?.forEach((re) => {
-        const name = re.exercise?.name || 'Exercise';
-        map.set(name.toLowerCase(), {
-          name,
-          muscle: re.exercise?.target_muscle_group || 'General',
-          routineName: r.name,
-          routineId: r.id,
-          targetSets: re.target_sets || 3,
-        });
+        const rawName = re.exercise?.name || 'Exercise';
+        const name = getBaseExerciseName(rawName);
+        const key = name.toLowerCase();
+        if (!map.has(key)) {
+          map.set(key, {
+            name,
+            muscle: re.exercise?.target_muscle_group || 'General',
+            routineName: r.name,
+            routineId: r.id,
+            targetSets: re.target_sets || 3,
+          });
+        }
       });
     });
 
     // 2. Add any standalone exercises from session history
     sessions.forEach((s) => {
       s.logged_exercises?.forEach((le) => {
-        const name = le.exercise_name?.trim();
-        if (name && !map.has(name.toLowerCase())) {
-          map.set(name.toLowerCase(), {
-            name,
-            muscle: 'General',
-            routineName: s.routine_name,
-            routineId: s.routine_id || undefined,
-            targetSets: 3,
-          });
+        const rawName = le.exercise_name?.trim();
+        if (rawName) {
+          const name = getBaseExerciseName(rawName);
+          const key = name.toLowerCase();
+          if (!map.has(key)) {
+            map.set(key, {
+              name,
+              muscle: 'General',
+              routineName: s.routine_name,
+              routineId: s.routine_id || undefined,
+              targetSets: 3,
+            });
+          }
         }
       });
     });
@@ -140,13 +149,23 @@ export const WorkoutsHub: React.FC<WorkoutsHubProps> = ({ onNavigateToRoutines }
     if (activeRoutineId === 'all') {
       list = allExerciseItems;
     } else if (currentRoutine) {
-      list = (currentRoutine.exercises || []).map((re) => ({
-        name: re.exercise?.name || 'Exercise',
-        muscle: re.exercise?.target_muscle_group || 'General',
-        routineName: currentRoutine.name,
-        routineId: currentRoutine.id,
-        targetSets: re.target_sets || 3,
-      }));
+      const seen = new Set<string>();
+      list = [];
+      (currentRoutine.exercises || []).forEach((re) => {
+        const rawName = re.exercise?.name || 'Exercise';
+        const name = getBaseExerciseName(rawName);
+        const key = name.toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          list.push({
+            name,
+            muscle: re.exercise?.target_muscle_group || 'General',
+            routineName: currentRoutine.name,
+            routineId: currentRoutine.id,
+            targetSets: re.target_sets || 3,
+          });
+        }
+      });
     } else {
       list = allExerciseItems;
     }

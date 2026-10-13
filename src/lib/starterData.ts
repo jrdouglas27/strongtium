@@ -106,30 +106,15 @@ export const STARTER_ROUTINES: Omit<Routine, 'user_id' | 'id' | 'created_at'>[] 
         }
       },
       {
-        id: 'ex-bicep-curl-left',
+        id: 'ex-bicep-curl',
         routine_id: 'sample-pull',
-        exercise_id: 'ex-bicep-curl-left',
+        exercise_id: 'ex-bicep-curl',
         target_sets: 3,
         order_index: 2,
         exercise: {
-          id: 'ex-bicep-curl-left',
+          id: 'ex-bicep-curl',
           user_id: 'sample',
-          name: 'Dumbbell Bicep Curls (Left Arm)',
-          target_muscle_group: 'Biceps',
-          default_unit: 'kg',
-          created_at: new Date().toISOString(),
-        }
-      },
-      {
-        id: 'ex-bicep-curl-right',
-        routine_id: 'sample-pull',
-        exercise_id: 'ex-bicep-curl-right',
-        target_sets: 3,
-        order_index: 3,
-        exercise: {
-          id: 'ex-bicep-curl-right',
-          user_id: 'sample',
-          name: 'Dumbbell Bicep Curls (Right Arm)',
+          name: 'Dumbbell Bicep Curls',
           target_muscle_group: 'Biceps',
           default_unit: 'kg',
           created_at: new Date().toISOString(),
@@ -140,7 +125,7 @@ export const STARTER_ROUTINES: Omit<Routine, 'user_id' | 'id' | 'created_at'>[] 
         routine_id: 'sample-pull',
         exercise_id: 'ex-face-pull',
         target_sets: 3,
-        order_index: 4,
+        order_index: 3,
         exercise: {
           id: 'ex-face-pull',
           user_id: 'sample',

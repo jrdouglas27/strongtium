@@ -8,7 +8,7 @@ import {
   LastExercisePerformance,
   LogExercisePayload,
 } from '../types/workout';
-import { calculate1RM, getBaseExerciseName, getLimbTypeForMuscle } from '../lib/calculations';
+import { calculate1RM, getBaseExerciseName, getLimbTypeForMuscle, isUnilateralExercise } from '../lib/calculations';
 import { STARTER_ROUTINES } from '../lib/starterData';
 
 export interface ExerciseHistoryEntry {
@@ -241,32 +241,26 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
           })),
       }));
 
-      // Auto-migrate: If any routine contains unsplit bicep curls, upgrade to Left & Right arm
+      // Auto-consolidate: If any routine contains split Left/Right exercise rows, merge back into a single base exercise
       let needsRefetch = false;
       for (const r of formattedRoutines) {
-        const hasUnsplitBicep = (r.exercises || []).some((re: any) => {
-          const n = re.exercise?.name?.trim().toLowerCase();
-          return n === 'dumbbell bicep curls' || n === 'bicep curls';
+        const hasSplitSide = (r.exercises || []).some((re: any) => {
+          const n = re.exercise?.name?.trim() || '';
+          return isUnilateralExercise(n).isUnilateral;
         });
 
-        if (hasUnsplitBicep && user) {
+        if (hasSplitSide && user) {
           const updatedExercises: { name: string; muscle: string; targetSets: number }[] = [];
+          const seenBase = new Set<string>();
+
           for (const re of (r.exercises || [])) {
-            const n = re.exercise?.name?.trim().toLowerCase();
-            if (n === 'dumbbell bicep curls' || n === 'bicep curls') {
+            const rawName = re.exercise?.name?.trim() || 'Exercise';
+            const baseName = getBaseExerciseName(rawName);
+            const key = baseName.toLowerCase();
+            if (!seenBase.has(key)) {
+              seenBase.add(key);
               updatedExercises.push({
-                name: 'Dumbbell Bicep Curls (Left Arm)',
-                muscle: 'Biceps',
-                targetSets: re.target_sets || 3,
-              });
-              updatedExercises.push({
-                name: 'Dumbbell Bicep Curls (Right Arm)',
-                muscle: 'Biceps',
-                targetSets: re.target_sets || 3,
-              });
-            } else {
-              updatedExercises.push({
-                name: re.exercise?.name || 'Exercise',
+                name: baseName,
                 muscle: re.exercise?.target_muscle_group || 'General',
                 targetSets: re.target_sets || 3,
               });
@@ -312,6 +306,8 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
           needsRefetch = true;
         }
       }
+
+
 
       if (needsRefetch) {
         return fetchData();
@@ -413,36 +409,49 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const getExerciseHistory = useCallback(
     (exerciseName: string): ExerciseHistoryEntry[] => {
       const cleanName = exerciseName.trim().toLowerCase();
-      if (!cleanName) return [];
+      const baseName = getBaseExerciseName(exerciseName).toLowerCase();
+      if (!cleanName && !baseName) return [];
 
       const history: ExerciseHistoryEntry[] = [];
 
       sessions.forEach((s) => {
         if (!s.completed_at) return;
-        const match = s.logged_exercises?.find(
-          (le) => le.exercise_name.trim().toLowerCase() === cleanName
-        );
+        const matchingExercises = s.logged_exercises?.filter((le) => {
+          const lName = le.exercise_name.trim().toLowerCase();
+          const lBase = getBaseExerciseName(le.exercise_name).toLowerCase();
+          return lName === cleanName || lBase === baseName;
+        });
 
-        if (match && match.sets.length > 0) {
-          const sets = match.sets.map((st) => ({
-            setNumber: st.set_number,
-            weight: Number(st.weight),
-            reps: Number(st.reps),
-          }));
-          const maxW = Math.max(...sets.map((st) => st.weight));
-          const best1RM = Math.max(...sets.map((st) => calculate1RM(st.weight, st.reps)));
-          const totalVol = sets.reduce((sum, st) => sum + st.weight * st.reps, 0);
-
-          history.push({
-            sessionId: s.id,
-            sessionName: s.routine_name,
-            completedAt: s.completed_at,
-            notes: match.exercise_notes,
-            sets,
-            maxWeight: maxW,
-            bestEstimated1RM: best1RM,
-            totalVolume: totalVol,
+        if (matchingExercises && matchingExercises.length > 0) {
+          const allSets: { setNumber: number; weight: number; reps: number; label?: string }[] = [];
+          matchingExercises.forEach((mEx) => {
+            const uni = isUnilateralExercise(mEx.exercise_name);
+            mEx.sets.forEach((st) => {
+              allSets.push({
+                setNumber: st.set_number,
+                weight: Number(st.weight),
+                reps: Number(st.reps),
+                label: uni.isUnilateral && uni.side ? uni.side.toUpperCase() : undefined,
+              });
+            });
           });
+
+          if (allSets.length > 0) {
+            const maxW = Math.max(...allSets.map((st) => st.weight));
+            const best1RM = Math.max(...allSets.map((st) => calculate1RM(st.weight, st.reps)));
+            const totalVol = allSets.reduce((sum, st) => sum + st.weight * st.reps, 0);
+
+            history.push({
+              sessionId: s.id,
+              sessionName: s.routine_name,
+              completedAt: s.completed_at,
+              notes: matchingExercises.map((m) => m.exercise_notes).filter(Boolean).join(' | '),
+              sets: allSets,
+              maxWeight: maxW,
+              bestEstimated1RM: best1RM,
+              totalVolume: totalVol,
+            });
+          }
         }
       });
 

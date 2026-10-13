@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { X, Dumbbell, Plus, Calendar } from 'lucide-react';
 import { useWorkout } from '../context/WorkoutContext';
 import { MUSCLE_GROUPS } from '../types/workout';
-import { toLocalISODate, formatWorkoutDateLabel, getLimbTypeForMuscle } from '../lib/calculations';
+import { toLocalISODate, formatWorkoutDateLabel } from '../lib/calculations';
 
 interface AddExerciseModalProps {
   onClose: () => void;
@@ -47,10 +47,7 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
         loggedAt = targetDate.toISOString();
       }
 
-      const limbType = getLimbTypeForMuscle(muscle);
-      const namesToCreate = splitSides
-        ? [`${name.trim()} (Left ${limbType})`, `${name.trim()} (Right ${limbType})`]
-        : [name.trim()];
+      const namesToCreate = [name.trim()];
 
       for (const exName of namesToCreate) {
         if (logNow && (Number(initialWeight) > 0 || Number(initialReps) > 0)) {
@@ -161,7 +158,7 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
           <div className="flex items-center justify-between bg-[#2d4554] border border-[#3f5d70] rounded-xl p-3">
             <div>
               <label className="text-xs font-bold text-white block">Unilateral (Left & Right Sides)</label>
-              <span className="text-[10px] text-[#cbd5e1]">Creates separate entries so you can log both arms or legs</span>
+              <span className="text-[10px] text-[#cbd5e1]">Enables independent Left & Right arm/leg logging in its exercise box</span>
             </div>
             <input
               type="checkbox"

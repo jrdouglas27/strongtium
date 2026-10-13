@@ -196,4 +196,44 @@ export function getLimbTypeForMuscle(muscle: string): 'Arm' | 'Leg' {
   return isLeg ? 'Leg' : 'Arm';
 }
 
+/**
+ * Detects if an exercise is typically performed unilaterally (L & R sides)
+ */
+export function isUnilateralMovement(name: string, muscle?: string): boolean {
+  if (!name) return false;
+  const lower = name.toLowerCase();
+
+  // Check explicit (Left/Right) indicator
+  if (/\((left|right)(\s+(arm|leg|side))?\)/i.test(name)) return true;
+
+  // Common unilateral movements
+  const unilateralKeywords = [
+    'bicep curl',
+    'dumbbell curl',
+    'hammer curl',
+    'concentration curl',
+    'preacher curl',
+    'single arm',
+    'single leg',
+    'one arm',
+    'one leg',
+    'lateral raise',
+    'split squat',
+    'lunge',
+    'kickback',
+    'bulgarian',
+    'step up',
+    'pistol squat',
+  ];
+
+  if (unilateralKeywords.some((kw) => lower.includes(kw))) return true;
+
+  // Also if muscle is Biceps or Forearms and mentions dumbbell
+  if (lower.includes('dumbbell') && (lower.includes('curl') || (muscle && /bicep|forearm/i.test(muscle)))) {
+    return true;
+  }
+
+  return false;
+}
+
 

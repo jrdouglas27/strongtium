@@ -17,7 +17,7 @@ import {
 import { useWorkout } from '../context/WorkoutContext';
 import { RoutineEditorModal } from './RoutineEditorModal';
 import { MUSCLE_GROUPS } from '../types/workout';
-import { isUnilateralExercise } from '../lib/calculations';
+import { isUnilateralExercise, isUnilateralMovement } from '../lib/calculations';
 
 export const RoutinesView: React.FC = () => {
   const {
@@ -26,7 +26,6 @@ export const RoutinesView: React.FC = () => {
     deleteRoutine,
     addOrUpdateExerciseToRoutine,
     removeExerciseFromRoutine,
-    splitExerciseInRoutine,
     bulkSaveRoutines,
     loadStarterRoutines,
   } = useWorkout();
@@ -51,8 +50,7 @@ Triceps Cable Pushdown (Triceps, 3 sets)
 # Pull (Back & Biceps)
 Barbell Bent-Over Row (Back, 3 sets)
 Lat Pulldown / Pull-Ups (Back, 3 sets)
-Dumbbell Bicep Curls (Left Arm) (Biceps, 3 sets)
-Dumbbell Bicep Curls (Right Arm) (Biceps, 3 sets)
+Dumbbell Bicep Curls (Biceps, 3 sets)
 Face Pulls (Rear Delts, 3 sets)
 
 # Legs & Core
@@ -649,15 +647,13 @@ Standing Calf Raise (Calves, 3 sets)`;
                                   </div>
 
                                   <div className="flex items-center space-x-2">
-                                    {!uni.isUnilateral && (
-                                      <button
-                                        type="button"
-                                        onClick={() => splitExerciseInRoutine(routine.id, exName)}
-                                        className="text-[10px] bg-[#3d5a6c] hover:bg-[#344e5e] text-[#8bb4cb] hover:text-white px-2 py-0.5 rounded-md border border-[#4e7085] font-bold transition"
-                                        title="Split this exercise into separate Left and Right side entries"
+                                    {isUnilateralMovement(exName, re.exercise?.target_muscle_group) && (
+                                      <span
+                                        className="text-[9px] bg-[#183446] text-[#8bb4cb] border border-[#2e5d7d] px-1.5 py-0.5 rounded font-extrabold"
+                                        title="L & R side tracking supported in workout logger"
                                       >
-                                        Split L/R
-                                      </button>
+                                        ⚡ L & R
+                                      </span>
                                     )}
                                     <span className="text-[#94a3b8] font-mono text-[11px] font-bold">
                                       {re.target_sets} sets
