@@ -34,12 +34,12 @@ export const ConsistencyHeatmap: React.FC<ConsistencyHeatmapProps> = ({
   defaultRange = '180d',
   className = '',
 }) => {
-  const { sessions } = useWorkout();
+  const { sessions, routines } = useWorkout();
   const [range, setRange] = useState<'90d' | '180d' | '365d'>(defaultRange);
   const [hoveredDay, setHoveredDay] = useState<HeatmapDayData | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  // Map completed workouts by date (YYYY-MM-DD)
+  // Map completed workouts by local date string (YYYY-MM-DD)
   const activityMap = useMemo(() => {
     const map = new Map<
       string,
@@ -51,9 +51,11 @@ export const ConsistencyHeatmap: React.FC<ConsistencyHeatmapProps> = ({
       }
     >();
 
+    // 1. Map all completed workout sessions
     sessions.forEach((s) => {
-      if (!s.completed_at) return;
-      const dateStr = new Date(s.completed_at).toISOString().split('T')[0];
+      const sessionDate = s.completed_at || s.started_at;
+      if (!sessionDate) return;
+      const dateStr = toLocalISODate(new Date(sessionDate));
       const existing = map.get(dateStr) || {
         count: 0,
         setsCount: 0,
@@ -76,8 +78,23 @@ export const ConsistencyHeatmap: React.FC<ConsistencyHeatmapProps> = ({
       map.set(dateStr, existing);
     });
 
+    // 2. Also map any routine marked completed on a date if not already recorded in a session
+    routines.forEach((r) => {
+      if (r.last_completed_at) {
+        const dateStr = toLocalISODate(new Date(r.last_completed_at));
+        if (!map.has(dateStr)) {
+          map.set(dateStr, {
+            count: 1,
+            setsCount: (r.exercises || []).reduce((acc, e) => acc + (e.target_sets || 3), 0),
+            volume: 0,
+            routines: [r.name],
+          });
+        }
+      }
+    });
+
     return map;
-  }, [sessions]);
+  }, [sessions, routines]);
 
   // Compute number of weeks based on selected range
   const numWeeks = useMemo(() => {
@@ -95,22 +112,21 @@ export const ConsistencyHeatmap: React.FC<ConsistencyHeatmapProps> = ({
 
   // Generate GitHub-style 7-day columns (Monday to Sunday)
   const { weeks, totalActiveDays, totalTrackedDays, activePercentage } = useMemo(() => {
-    const today = new Date();
-    today.setHours(23, 59, 59, 999);
-    const todayStr = toLocalISODate();
+    const now = new Date();
+    const todayStr = toLocalISODate(now);
 
     // Monday is index 0, Sunday is index 6
-    const todayMonIndex = (today.getDay() + 6) % 7;
+    const todayMonIndex = (now.getDay() + 6) % 7;
 
-    // End of current week (Sunday)
-    const endOfWeek = new Date(today);
-    endOfWeek.setDate(today.getDate() + (6 - todayMonIndex));
-    endOfWeek.setHours(23, 59, 59, 999);
-
-    // Start Monday N weeks ago
-    const startMonday = new Date(endOfWeek);
-    startMonday.setDate(endOfWeek.getDate() - (numWeeks * 7 - 1));
-    startMonday.setHours(0, 0, 0, 0);
+    // Start Monday N weeks ago at 12:00 noon local time to avoid DST boundary shifts
+    const startMonday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - todayMonIndex - (numWeeks - 1) * 7,
+      12,
+      0,
+      0
+    );
 
     const generatedWeeks: HeatmapWeekData[] = [];
     let activeDaysCount = 0;
@@ -122,12 +138,18 @@ export const ConsistencyHeatmap: React.FC<ConsistencyHeatmapProps> = ({
       let weekMonthLabel: string | undefined = undefined;
 
       for (let dIdx = 0; dIdx < 7; dIdx++) {
-        const d = new Date(startMonday);
-        d.setDate(startMonday.getDate() + (w * 7 + dIdx));
-        const dateStr = d.toISOString().split('T')[0];
+        const d = new Date(
+          startMonday.getFullYear(),
+          startMonday.getMonth(),
+          startMonday.getDate() + (w * 7 + dIdx),
+          12,
+          0,
+          0
+        );
+        const dateStr = toLocalISODate(d);
 
         const isToday = dateStr === todayStr;
-        const isFuture = d > today;
+        const isFuture = dateStr > todayStr;
 
         // Check if this week begins a new month
         const m = d.getMonth();
@@ -166,12 +188,14 @@ export const ConsistencyHeatmap: React.FC<ConsistencyHeatmapProps> = ({
         weekDays.push({
           dateStr,
           displayDate: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-          fullDateLabel: d.toLocaleDateString(undefined, {
-            weekday: 'short',
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-          }),
+          fullDateLabel: isToday
+            ? `Today (${d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })})`
+            : d.toLocaleDateString(undefined, {
+                weekday: 'short',
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+              }),
           dayOfWeek: dIdx,
           count,
           setsCount,
