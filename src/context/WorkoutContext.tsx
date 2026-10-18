@@ -581,10 +581,10 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
         .eq('user_id', user.id)
         .gte('completed_at', startOfDay)
         .lte('completed_at', endOfDay)
-        .order('completed_at', { ascending: false })
-        .limit(1);
+        .order('completed_at', { ascending: false });
 
-      let sessionId = existingSessions && existingSessions.length > 0 ? existingSessions[0].id : null;
+      const allSessionIdsOnDate = (existingSessions || []).map((s) => s.id);
+      let sessionId = allSessionIdsOnDate.length > 0 ? allSessionIdsOnDate[0] : null;
 
       if (!sessionId) {
         const { data: newSession, error: sErr } = await supabase
@@ -603,7 +603,16 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
         sessionId = newSession.id;
       }
 
-      // 3. Insert logged exercise & sets
+      // 3. Delete any existing entry for this exercise across sessions on this date to prevent duplicate rows
+      if (allSessionIdsOnDate.length > 0) {
+        await supabase
+          .from('logged_exercises')
+          .delete()
+          .in('session_id', allSessionIdsOnDate)
+          .ilike('exercise_name', payload.exerciseName.trim());
+      }
+
+      // Insert logged exercise & sets
       const { data: exRow, error: exErr } = await supabase
         .from('logged_exercises')
         .insert({

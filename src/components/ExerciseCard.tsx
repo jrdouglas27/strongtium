@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Dumbbell,
   History,
@@ -98,28 +98,60 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
   const prBilateral = personalRecords[baseName.trim()] || personalRecords[exerciseName.trim()];
 
   // Check if already logged on active date
-  const targetDateObj = new Date(`${activeDate}T12:00:00`);
-  const targetDateStr = targetDateObj.toDateString();
+  const findLatestLoggedExercise = useCallback(
+    (targetName: string) => {
+      const clean = targetName.trim().toLowerCase();
+      for (const session of sessions) {
+        const d = session.completed_at || session.started_at;
+        if (!d || toLocalISODate(new Date(d)) !== activeDate) continue;
 
-  const loggedExercisesForDate = useMemo(() => {
-    return sessions
-      .filter((s) => s.completed_at && new Date(s.completed_at).toDateString() === targetDateStr)
-      .flatMap((s) => s.logged_exercises || []);
-  }, [sessions, targetDateStr]);
+        const matches = (session.logged_exercises || []).filter(
+          (le) => le.exercise_name.trim().toLowerCase() === clean
+        );
+        if (matches.length > 0) {
+          const withSets = matches.filter((m) => (m.sets || []).length > 0);
+          return withSets.length > 0 ? withSets[withSets.length - 1] : matches[matches.length - 1];
+        }
+      }
+      return null;
+    },
+    [sessions, activeDate]
+  );
 
-  const leftLogged = loggedExercisesForDate.find(
-    (le) => le.exercise_name.trim().toLowerCase() === leftExerciseName.toLowerCase()
+  const leftLogged = useMemo(
+    () => findLatestLoggedExercise(leftExerciseName),
+    [findLatestLoggedExercise, leftExerciseName]
   );
-  const rightLogged = loggedExercisesForDate.find(
-    (le) => le.exercise_name.trim().toLowerCase() === rightExerciseName.toLowerCase()
+  const rightLogged = useMemo(
+    () => findLatestLoggedExercise(rightExerciseName),
+    [findLatestLoggedExercise, rightExerciseName]
   );
-  const baseLogged = loggedExercisesForDate.find(
-    (le) => le.exercise_name.trim().toLowerCase() === baseName.toLowerCase()
+  const baseLogged = useMemo(
+    () => findLatestLoggedExercise(baseName),
+    [findLatestLoggedExercise, baseName]
   );
 
   const hasExistingLog = Boolean(
     (isUnilateral && (leftLogged || rightLogged)) || (!isUnilateral && baseLogged)
   );
+
+  // Stable fingerprint of the saved DB state + active date + last performance baseline
+  const savedDataFingerprint = useMemo(() => {
+    const lId = leftLogged?.id || '';
+    const lSets = (leftLogged?.sets || []).map((s) => `${s.set_number}:${s.weight}:${s.reps}`).join(',');
+    const rId = rightLogged?.id || '';
+    const rSets = (rightLogged?.sets || []).map((s) => `${s.set_number}:${s.weight}:${s.reps}`).join(',');
+    const bId = baseLogged?.id || '';
+    const bSets = (baseLogged?.sets || []).map((s) => `${s.set_number}:${s.weight}:${s.reps}`).join(',');
+    const n = leftLogged?.exercise_notes || rightLogged?.exercise_notes || baseLogged?.exercise_notes || '';
+
+    const perfKey = `${leftPerf?.last_performed_at || ''}_${(leftPerf?.sets || []).map((s) => `${s.weight}x${s.reps}`).join(',')}_${rightPerf?.last_performed_at || ''}_${(rightPerf?.sets || []).map((s) => `${s.weight}x${s.reps}`).join(',')}_${bilateralPerf?.last_performed_at || ''}_${(bilateralPerf?.sets || []).map((s) => `${s.weight}x${s.reps}`).join(',')}`;
+
+    return `${baseName}__${activeDate}__${lId}[${lSets}]__${rId}[${rSets}]__${bId}[${bSets}]__${n}__perf[${perfKey}]`;
+  }, [baseName, activeDate, leftLogged, rightLogged, baseLogged, leftPerf, rightPerf, bilateralPerf]);
+
+  const lastLoadedKeyRef = useRef<string>(savedDataFingerprint);
+  const isDirtyRef = useRef<boolean>(false);
 
   // State: Unilateral Sets
   const [uniSets, setUniSets] = useState<UnilateralSetState[]>(() => {
@@ -195,8 +227,20 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
 
-  // Sync state when active date or logs update
+  // Sync state when active date or logs update in database
   useEffect(() => {
+    if (lastLoadedKeyRef.current === savedDataFingerprint) {
+      return;
+    }
+
+    // If user has unsaved edits for this exercise and date, don't overwrite them
+    if (isDirtyRef.current && lastLoadedKeyRef.current.startsWith(`${baseName}__${activeDate}__`)) {
+      return;
+    }
+
+    lastLoadedKeyRef.current = savedDataFingerprint;
+    isDirtyRef.current = false;
+
     const leftSets = leftLogged?.sets || [];
     const rightSets = rightLogged?.sets || [];
     const maxLen = Math.max(leftSets.length, rightSets.length);
@@ -262,7 +306,18 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
       );
       setNotes('');
     }
-  }, [leftLogged, rightLogged, baseLogged, activeDate, targetSets, leftPerf, rightPerf, bilateralPerf]);
+  }, [
+    savedDataFingerprint,
+    baseName,
+    activeDate,
+    leftLogged,
+    rightLogged,
+    baseLogged,
+    leftPerf,
+    rightPerf,
+    bilateralPerf,
+    targetSets,
+  ]);
 
   // Unilateral Handlers
   const handleUpdateUniSet = (
@@ -271,6 +326,7 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
     field: 'Weight' | 'Reps',
     val: number
   ) => {
+    isDirtyRef.current = true;
     const updated = [...uniSets];
     const key = `${side}${field}` as 'leftWeight' | 'leftReps' | 'rightWeight' | 'rightReps';
     updated[idx] = {
@@ -286,6 +342,7 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
     field: 'Weight' | 'Reps',
     delta: number
   ) => {
+    isDirtyRef.current = true;
     const updated = [...uniSets];
     const key = `${side}${field}` as 'leftWeight' | 'leftReps' | 'rightWeight' | 'rightReps';
     const current = Number(updated[idx][key]) || 0;
@@ -298,6 +355,7 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
   };
 
   const handleCopyLeftToRight = (idx: number) => {
+    isDirtyRef.current = true;
     const updated = [...uniSets];
     updated[idx] = {
       ...updated[idx],
@@ -308,6 +366,7 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
   };
 
   const handleToggleUniComplete = (idx: number) => {
+    isDirtyRef.current = true;
     const updated = [...uniSets];
     updated[idx] = {
       ...updated[idx],
@@ -317,6 +376,7 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
   };
 
   const handleAddUniSet = () => {
+    isDirtyRef.current = true;
     const last = uniSets[uniSets.length - 1];
     setUniSets([
       ...uniSets,
@@ -332,12 +392,14 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
   };
 
   const handleRemoveUniSet = (idx: number) => {
+    isDirtyRef.current = true;
     if (uniSets.length <= 1) return;
     const updated = uniSets.filter((_, i) => i !== idx).map((s, i) => ({ ...s, setNumber: i + 1 }));
     setUniSets(updated);
   };
 
   const handlePrefillUniLast = () => {
+    isDirtyRef.current = true;
     const count = Math.max(leftPerf?.sets.length || 0, rightPerf?.sets.length || 0, targetSets || 3);
     const newSets: UnilateralSetState[] = Array.from({ length: count }, (_, i) => {
       const pL = leftPerf?.sets[i] || leftPerf?.sets[leftPerf.sets.length - 1];
@@ -356,12 +418,14 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
 
   // Bilateral Handlers
   const handleUpdateBiSet = (idx: number, field: 'weight' | 'reps', val: number) => {
+    isDirtyRef.current = true;
     const updated = [...biSets];
     updated[idx] = { ...updated[idx], [field]: Math.max(0, val) };
     setBiSets(updated);
   };
 
   const handleAdjustBiSet = (idx: number, field: 'weight' | 'reps', delta: number) => {
+    isDirtyRef.current = true;
     const updated = [...biSets];
     const current = Number(updated[idx][field]) || 0;
     const nextVal = Math.max(0, Math.round((current + delta) * 10) / 10);
@@ -370,12 +434,14 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
   };
 
   const handleToggleBiComplete = (idx: number) => {
+    isDirtyRef.current = true;
     const updated = [...biSets];
     updated[idx] = { ...updated[idx], isCompleted: !updated[idx].isCompleted };
     setBiSets(updated);
   };
 
   const handleAddBiSet = () => {
+    isDirtyRef.current = true;
     const last = biSets[biSets.length - 1];
     setBiSets([
       ...biSets,
@@ -389,6 +455,7 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
   };
 
   const handleRemoveBiSet = (idx: number) => {
+    isDirtyRef.current = true;
     if (biSets.length <= 1) return;
     const updated = biSets.filter((_, i) => i !== idx).map((s, i) => ({ ...s, setNumber: i + 1 }));
     setBiSets(updated);
@@ -396,6 +463,7 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
 
   const handlePrefillBiLast = () => {
     if (!bilateralPerf || bilateralPerf.sets.length === 0) return;
+    isDirtyRef.current = true;
     setBiSets(
       bilateralPerf.sets.map((ps, idx) => ({
         setNumber: idx + 1,
@@ -456,6 +524,7 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
           })),
         });
 
+        isDirtyRef.current = false;
         setUniSets((prev) => prev.map((s) => ({ ...s, isCompleted: true })));
       } else {
         const validSets = biSets.filter((s) => s.weight > 0 || s.reps > 0);
@@ -475,6 +544,7 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
           })),
         });
 
+        isDirtyRef.current = false;
         setBiSets((prev) => prev.map((s) => ({ ...s, isCompleted: true })));
       }
 
@@ -1209,7 +1279,10 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
           type="text"
           placeholder="Notes on form, resistance, cues (e.g. paused at peak, +2.5kg next session)..."
           value={notes}
-          onChange={(e) => setNotes(e.target.value)}
+          onChange={(e) => {
+            isDirtyRef.current = true;
+            setNotes(e.target.value);
+          }}
           className="w-full bg-[#2d4554] border border-[#3f5d70] rounded-xl px-3 py-2 text-xs text-[#f1f5f9] placeholder-[#94a3b8] focus:outline-none focus:border-[#8bb4cb]"
         />
       </div>
