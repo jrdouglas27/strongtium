@@ -13,7 +13,7 @@ export const RoutineEditorModal: React.FC<RoutineEditorModalProps> = ({ onClose 
   const [description, setDescription] = useState('');
   const [restDays, setRestDays] = useState(3);
   const [exercises, setExercises] = useState<
-    { name: string; muscle: string; targetSets: number }[]
+    { name: string; muscle: string; targetSets: number | '' }[]
   >([
     { name: '', muscle: 'General', targetSets: 3 },
   ]);
@@ -44,7 +44,13 @@ export const RoutineEditorModal: React.FC<RoutineEditorModalProps> = ({ onClose 
       return;
     }
 
-    const validExercises = exercises.filter((e) => e.name.trim().length > 0);
+    const validExercises = exercises
+      .filter((e) => e.name.trim().length > 0)
+      .map((e) => ({
+        name: e.name.trim(),
+        muscle: e.muscle,
+        targetSets: Number(e.targetSets) > 0 ? Number(e.targetSets) : 3,
+      }));
     if (validExercises.length === 0) {
       alert('Please add at least one exercise.');
       return;
@@ -178,17 +184,54 @@ export const RoutineEditorModal: React.FC<RoutineEditorModalProps> = ({ onClose 
                     ))}
                   </select>
 
-                  <input
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={ex.targetSets}
-                    onChange={(e) =>
-                      handleUpdateExercise(idx, 'targetSets', parseInt(e.target.value, 10) || 3)
-                    }
-                    className="w-16 bg-[#3d5a6c] border border-[#3f5d70] rounded-lg px-2 py-1.5 text-xs text-center text-white font-mono font-bold"
-                    title="Target Sets"
-                  />
+                  <div className="flex items-center space-x-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cur = Number(ex.targetSets) || 3;
+                        handleUpdateExercise(idx, 'targetSets', Math.max(1, cur - 1));
+                      }}
+                      className="w-6 h-7 rounded-lg bg-[#3d5a6c] hover:bg-[#344e5e] text-white flex items-center justify-center font-bold text-xs border border-[#3f5d70] transition"
+                      title="Decrease sets"
+                    >
+                      -
+                    </button>
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={ex.targetSets}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === '') {
+                          handleUpdateExercise(idx, 'targetSets', '');
+                        } else {
+                          const parsed = parseInt(v, 10);
+                          if (!isNaN(parsed)) {
+                            handleUpdateExercise(idx, 'targetSets', Math.max(1, Math.min(20, parsed)));
+                          }
+                        }
+                      }}
+                      onBlur={() => {
+                        if (!ex.targetSets || Number(ex.targetSets) < 1) {
+                          handleUpdateExercise(idx, 'targetSets', 3);
+                        }
+                      }}
+                      className="w-12 bg-[#3d5a6c] border border-[#3f5d70] rounded-lg px-1.5 py-1 text-xs text-center text-white font-mono font-bold focus:outline-none focus:border-[#8bb4cb]"
+                      title="Target Sets"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cur = Number(ex.targetSets) || 3;
+                        handleUpdateExercise(idx, 'targetSets', Math.min(20, cur + 1));
+                      }}
+                      className="w-6 h-7 rounded-lg bg-[#3d5a6c] hover:bg-[#344e5e] text-white flex items-center justify-center font-bold text-xs border border-[#3f5d70] transition"
+                      title="Increase sets"
+                    >
+                      +
+                    </button>
+                  </div>
 
                   {exercises.length > 1 && (
                     <button

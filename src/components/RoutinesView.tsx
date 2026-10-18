@@ -37,7 +37,7 @@ export const RoutinesView: React.FC = () => {
   const [quickExName, setQuickExName] = useState('');
   const [quickExMuscle, setQuickExMuscle] = useState('Chest');
   const [quickExRoutineId, setQuickExRoutineId] = useState(routines[0]?.id || '');
-  const [quickExSets, setQuickExSets] = useState(3);
+  const [quickExSets, setQuickExSets] = useState<number | ''>(3);
   const [quickAddedFeedback, setQuickAddedFeedback] = useState(false);
 
   // Bulk Text Importer State
@@ -69,7 +69,7 @@ Standing Calf Raise (Calves, 3 sets)`;
     name: string;
     description: string;
     targetRestDays: number;
-    exercises: { name: string; muscle: string; targetSets: number }[];
+    exercises: { name: string; muscle: string; targetSets: number | '' }[];
   } | null>(null);
 
   const muscleGroups = MUSCLE_GROUPS;
@@ -79,11 +79,12 @@ Standing Calf Raise (Calves, 3 sets)`;
     e.preventDefault();
     if (!quickExName.trim() || !quickExRoutineId) return;
 
+    const setsToSave = Number(quickExSets) > 0 ? Number(quickExSets) : 3;
     await addOrUpdateExerciseToRoutine(
       quickExRoutineId,
       quickExName.trim(),
       quickExMuscle,
-      quickExSets
+      setsToSave
     );
 
     setQuickExName('');
@@ -112,12 +113,17 @@ Standing Calf Raise (Calves, 3 sets)`;
   // Save Inline Routine Edit
   const handleSaveInlineEdit = async () => {
     if (!inlineEditingRoutine) return;
+    const cleanExercises = inlineEditingRoutine.exercises.map((e) => ({
+      name: e.name,
+      muscle: e.muscle,
+      targetSets: Number(e.targetSets) > 0 ? Number(e.targetSets) : 3,
+    }));
     await updateRoutine(
       inlineEditingRoutine.id,
       inlineEditingRoutine.name,
       inlineEditingRoutine.description,
       inlineEditingRoutine.targetRestDays,
-      inlineEditingRoutine.exercises
+      cleanExercises
     );
     setInlineEditingRoutine(null);
   };
@@ -334,21 +340,60 @@ Standing Calf Raise (Calves, 3 sets)`;
             </select>
           </div>
 
-          <div className="sm:col-span-2 flex space-x-1.5">
-            <input
-              type="number"
-              min={1}
-              max={15}
-              value={quickExSets}
-              onChange={(e) => setQuickExSets(Math.max(1, parseInt(e.target.value) || 3))}
-              className="w-14 bg-[#2d4554] border border-[#3f5d70] rounded-xl px-2 py-2 text-xs text-center text-white font-mono font-bold"
-              title="Target Sets"
-            />
+          <div className="sm:col-span-2 flex items-center space-x-1.5">
+            <div className="flex items-center space-x-0.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  const cur = Number(quickExSets) || 3;
+                  setQuickExSets(Math.max(1, cur - 1));
+                }}
+                className="w-5 h-8 rounded-lg bg-[#2d4554] hover:bg-[#223541] text-white flex items-center justify-center font-bold text-xs border border-[#3f5d70] transition"
+                title="Decrease sets"
+              >
+                -
+              </button>
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={quickExSets}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === '') {
+                    setQuickExSets('');
+                  } else {
+                    const parsed = parseInt(v, 10);
+                    if (!isNaN(parsed)) {
+                      setQuickExSets(Math.max(1, Math.min(20, parsed)));
+                    }
+                  }
+                }}
+                onBlur={() => {
+                  if (!quickExSets || Number(quickExSets) < 1) {
+                    setQuickExSets(3);
+                  }
+                }}
+                className="w-8 bg-[#2d4554] border border-[#3f5d70] rounded-lg px-0.5 py-1.5 text-xs text-center text-white font-mono font-bold focus:outline-none focus:border-[#8bb4cb]"
+                title="Target Sets"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const cur = Number(quickExSets) || 3;
+                  setQuickExSets(Math.min(20, cur + 1));
+                }}
+                className="w-5 h-8 rounded-lg bg-[#2d4554] hover:bg-[#223541] text-white flex items-center justify-center font-bold text-xs border border-[#3f5d70] transition"
+                title="Increase sets"
+              >
+                +
+              </button>
+            </div>
 
             <button
               type="submit"
               disabled={!quickExName.trim()}
-              className={`flex-1 flex items-center justify-center space-x-1 py-2 px-3 rounded-xl text-xs font-extrabold transition shadow-sm ${
+              className={`flex-1 flex items-center justify-center space-x-1 py-2 px-2 rounded-xl text-xs font-extrabold transition shadow-sm ${
                 quickAddedFeedback
                   ? 'bg-[#8fb89e] text-[#0e2a18] border border-[#78a387]'
                   : 'bg-[#8bb4cb] hover:bg-[#749fb7] text-[#0e2938] border border-[#749fb7]'
@@ -506,22 +551,74 @@ Standing Calf Raise (Calves, 3 sets)`;
                                 ))}
                               </select>
 
-                              <input
-                                type="number"
-                                min={1}
-                                max={15}
-                                value={ex.targetSets}
-                                onChange={(e) => {
-                                  const updated = [...inlineEditingRoutine.exercises];
-                                  updated[exIdx].targetSets = parseInt(e.target.value, 10) || 3;
-                                  setInlineEditingRoutine({
-                                    ...inlineEditingRoutine,
-                                    exercises: updated,
-                                  });
-                                }}
-                                className="w-12 bg-[#3d5a6c] border border-[#4e7085] rounded-lg px-1.5 py-1 text-xs text-center text-white font-mono"
-                                title="Target sets"
-                              />
+                              <div className="flex items-center space-x-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const cur = Number(ex.targetSets) || 3;
+                                    const updated = [...inlineEditingRoutine.exercises];
+                                    updated[exIdx].targetSets = Math.max(1, cur - 1);
+                                    setInlineEditingRoutine({
+                                      ...inlineEditingRoutine,
+                                      exercises: updated,
+                                    });
+                                  }}
+                                  className="w-5 h-6 rounded bg-[#3d5a6c] hover:bg-[#344e5e] text-white flex items-center justify-center font-bold text-[11px] border border-[#4e7085] transition"
+                                  title="Decrease sets"
+                                >
+                                  -
+                                </button>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={20}
+                                  value={ex.targetSets}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    const updated = [...inlineEditingRoutine.exercises];
+                                    if (v === '') {
+                                      updated[exIdx].targetSets = '';
+                                    } else {
+                                      const parsed = parseInt(v, 10);
+                                      if (!isNaN(parsed)) {
+                                        updated[exIdx].targetSets = Math.max(1, Math.min(20, parsed));
+                                      }
+                                    }
+                                    setInlineEditingRoutine({
+                                      ...inlineEditingRoutine,
+                                      exercises: updated,
+                                    });
+                                  }}
+                                  onBlur={() => {
+                                    const updated = [...inlineEditingRoutine.exercises];
+                                    if (!updated[exIdx].targetSets || Number(updated[exIdx].targetSets) < 1) {
+                                      updated[exIdx].targetSets = 3;
+                                      setInlineEditingRoutine({
+                                        ...inlineEditingRoutine,
+                                        exercises: updated,
+                                      });
+                                    }
+                                  }}
+                                  className="w-9 bg-[#3d5a6c] border border-[#4e7085] rounded-md px-1 py-1 text-xs text-center text-white font-mono focus:outline-none focus:border-[#8bb4cb]"
+                                  title="Target sets"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const cur = Number(ex.targetSets) || 3;
+                                    const updated = [...inlineEditingRoutine.exercises];
+                                    updated[exIdx].targetSets = Math.min(20, cur + 1);
+                                    setInlineEditingRoutine({
+                                      ...inlineEditingRoutine,
+                                      exercises: updated,
+                                    });
+                                  }}
+                                  className="w-5 h-6 rounded bg-[#3d5a6c] hover:bg-[#344e5e] text-white flex items-center justify-center font-bold text-[11px] border border-[#4e7085] transition"
+                                  title="Increase sets"
+                                >
+                                  +
+                                </button>
+                              </div>
 
                               <button
                                 type="button"

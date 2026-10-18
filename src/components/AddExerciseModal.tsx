@@ -19,7 +19,7 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
   const [name, setName] = useState('');
   const [muscle, setMuscle] = useState<string>(MUSCLE_GROUPS[0]);
   const [routineId, setRoutineId] = useState(defaultRoutineId || '');
-  const [targetSets, setTargetSets] = useState(3);
+  const [targetSets, setTargetSets] = useState<number | ''>(3);
   const [initialWeight, setInitialWeight] = useState<number | ''>('');
   const [initialReps, setInitialReps] = useState<number | ''>('');
   const [splitSides, setSplitSides] = useState(false);
@@ -57,7 +57,7 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
             routineId: routineId || undefined,
             routineName: selectedRoutine?.name || undefined,
             loggedAt,
-            sets: Array.from({ length: targetSets }, (_, i) => ({
+            sets: Array.from({ length: Number(targetSets) > 0 ? Number(targetSets) : 3 }, (_, i) => ({
               setNumber: i + 1,
               weight: Number(initialWeight) || 0,
               reps: Number(initialReps) || 0,
@@ -205,12 +205,53 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
                 <div className="grid grid-cols-3 gap-2 text-xs">
                   <div>
                     <span className="text-[10px] text-[#94a3b8] font-bold block mb-1">Target Sets</span>
-                    <input
-                      type="number"
-                      value={targetSets}
-                      onChange={(e) => setTargetSets(Math.max(1, parseInt(e.target.value) || 1))}
-                      className="w-full bg-[#3d5a6c] border border-[#4e7085] rounded-lg p-2 text-white font-mono text-center"
-                    />
+                    <div className="flex items-center space-x-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const cur = Number(targetSets) || 3;
+                          setTargetSets(Math.max(1, cur - 1));
+                        }}
+                        className="w-6 h-8 rounded-lg bg-[#2d4554] hover:bg-[#223541] text-white flex items-center justify-center font-bold text-xs border border-[#3f5d70] transition"
+                        title="Decrease sets"
+                      >
+                        -
+                      </button>
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={targetSets}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v === '') {
+                            setTargetSets('');
+                          } else {
+                            const parsed = parseInt(v, 10);
+                            if (!isNaN(parsed)) {
+                              setTargetSets(Math.max(1, Math.min(20, parsed)));
+                            }
+                          }
+                        }}
+                        onBlur={() => {
+                          if (!targetSets || Number(targetSets) < 1) {
+                            setTargetSets(3);
+                          }
+                        }}
+                        className="w-full bg-[#3d5a6c] border border-[#4e7085] rounded-lg p-2 text-white font-mono text-center focus:outline-none focus:border-[#8bb4cb]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const cur = Number(targetSets) || 3;
+                          setTargetSets(Math.min(20, cur + 1));
+                        }}
+                        className="w-6 h-8 rounded-lg bg-[#2d4554] hover:bg-[#223541] text-white flex items-center justify-center font-bold text-xs border border-[#3f5d70] transition"
+                        title="Increase sets"
+                      >
+                        +
+                      </button>
+                    </div>
                   </div>
                   <div>
                     <span className="text-[10px] text-[#94a3b8] font-bold block mb-1">Weight (kg)</span>
