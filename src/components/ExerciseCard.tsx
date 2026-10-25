@@ -22,7 +22,6 @@ import {
   formatWorkoutDateLabel,
   getBaseExerciseName,
   getLimbTypeForMuscle,
-  isUnilateralMovement,
 } from '../lib/calculations';
 
 interface ExerciseCardProps {
@@ -65,6 +64,8 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
     logExerciseSets,
     getExerciseHistory,
     sessions,
+    setExerciseUnilateral,
+    isExerciseUnilateral,
   } = useWorkout();
 
   // Determine base exercise name and limb type ('Arm' vs 'Leg')
@@ -74,12 +75,11 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
   const rightExerciseName = `${baseName} (Right ${limbType})`;
 
   // Determine if this exercise defaults to Unilateral L/R tracking
-  const autoUnilateral = useMemo(
-    () => isUnilateralMovement(exerciseName, targetMuscleGroup),
-    [exerciseName, targetMuscleGroup]
+  const configuredUnilateral = useMemo(
+    () => isExerciseUnilateral(exerciseName, targetMuscleGroup),
+    [isExerciseUnilateral, exerciseName, targetMuscleGroup]
   );
 
-  const [isUnilateral, setIsUnilateral] = useState<boolean>(autoUnilateral);
   const [unilateralViewMode, setUnilateralViewMode] = useState<'combined' | 'columns' | 'left' | 'right'>('combined');
 
   // Date context: defaults to local today if not specified
@@ -130,6 +130,19 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
     () => findLatestLoggedExercise(baseName),
     [findLatestLoggedExercise, baseName]
   );
+
+  const [isUnilateral, setIsUnilateral] = useState<boolean>(() => {
+    if (leftLogged || rightLogged) return true;
+    if (baseLogged && (baseLogged.sets || []).length > 0) return false;
+    return configuredUnilateral;
+  });
+
+  // Keep tracking mode updated with configured preference when no conflicting log on active date
+  useEffect(() => {
+    if (!leftLogged && !rightLogged && (!baseLogged || (baseLogged.sets || []).length === 0)) {
+      setIsUnilateral(configuredUnilateral);
+    }
+  }, [configuredUnilateral, leftLogged, rightLogged, baseLogged]);
 
   const hasExistingLog = Boolean(
     (isUnilateral && (leftLogged || rightLogged)) || (!isUnilateral && baseLogged)
@@ -599,7 +612,11 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
             {/* Toggle L & R Mode Button */}
             <button
               type="button"
-              onClick={() => setIsUnilateral(!isUnilateral)}
+              onClick={() => {
+                const nextVal = !isUnilateral;
+                setIsUnilateral(nextVal);
+                setExerciseUnilateral(baseName, nextVal);
+              }}
               className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border flex items-center space-x-1 uppercase tracking-wider transition ${
                 isUnilateral
                   ? 'bg-[#183446] text-[#8bb4cb] border-[#2e5d7d] hover:bg-[#20445c]'

@@ -198,15 +198,33 @@ export function getLimbTypeForMuscle(muscle: string): 'Arm' | 'Leg' {
 
 /**
  * Detects if an exercise is typically performed unilaterally (L & R sides)
+ * Supports user custom preference overrides (exercise name -> boolean)
  */
-export function isUnilateralMovement(name: string, muscle?: string): boolean {
+export function isUnilateralMovement(
+  name: string,
+  muscle?: string,
+  customPreferences?: Record<string, boolean>
+): boolean {
   if (!name) return false;
-  const lower = name.toLowerCase();
+  const baseName = getBaseExerciseName(name).trim().toLowerCase();
 
-  // Check explicit (Left/Right) indicator
+  // 1. Check user custom preference overrides first
+  if (customPreferences) {
+    if (baseName in customPreferences) {
+      return Boolean(customPreferences[baseName]);
+    }
+    const match = Object.keys(customPreferences).find(
+      (k) => k.trim().toLowerCase() === baseName
+    );
+    if (match !== undefined) {
+      return Boolean(customPreferences[match]);
+    }
+  }
+
+  // 2. Check explicit (Left/Right) indicator
   if (/\((left|right)(\s+(arm|leg|side))?\)/i.test(name)) return true;
 
-  // Common unilateral movements
+  // 3. Common unilateral movements
   const unilateralKeywords = [
     'bicep curl',
     'dumbbell curl',
@@ -226,10 +244,10 @@ export function isUnilateralMovement(name: string, muscle?: string): boolean {
     'pistol squat',
   ];
 
-  if (unilateralKeywords.some((kw) => lower.includes(kw))) return true;
+  if (unilateralKeywords.some((kw) => baseName.includes(kw))) return true;
 
-  // Also if muscle is Biceps or Forearms and mentions dumbbell
-  if (lower.includes('dumbbell') && (lower.includes('curl') || (muscle && /bicep|forearm/i.test(muscle)))) {
+  // 4. Also if muscle is Biceps or Forearms and mentions dumbbell
+  if (baseName.includes('dumbbell') && (baseName.includes('curl') || (muscle && /bicep|forearm/i.test(muscle)))) {
     return true;
   }
 

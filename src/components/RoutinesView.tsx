@@ -17,7 +17,7 @@ import {
 import { useWorkout } from '../context/WorkoutContext';
 import { RoutineEditorModal } from './RoutineEditorModal';
 import { MUSCLE_GROUPS } from '../types/workout';
-import { isUnilateralExercise, isUnilateralMovement } from '../lib/calculations';
+import { isUnilateralExercise } from '../lib/calculations';
 
 export const RoutinesView: React.FC = () => {
   const {
@@ -28,6 +28,8 @@ export const RoutinesView: React.FC = () => {
     removeExerciseFromRoutine,
     bulkSaveRoutines,
     loadStarterRoutines,
+    isExerciseUnilateral,
+    setExerciseUnilateral,
   } = useWorkout();
 
   const [activeViewMode, setActiveViewMode] = useState<'splits' | 'matrix' | 'text'>('splits');
@@ -38,7 +40,23 @@ export const RoutinesView: React.FC = () => {
   const [quickExMuscle, setQuickExMuscle] = useState('Chest');
   const [quickExRoutineId, setQuickExRoutineId] = useState(routines[0]?.id || '');
   const [quickExSets, setQuickExSets] = useState<number | ''>(3);
+  const [quickExUnilateral, setQuickExUnilateral] = useState(false);
+  const quickExUserToggledRef = React.useRef(false);
   const [quickAddedFeedback, setQuickAddedFeedback] = useState(false);
+
+  const handleQuickNameChange = (val: string) => {
+    setQuickExName(val);
+    if (!quickExUserToggledRef.current) {
+      setQuickExUnilateral(isExerciseUnilateral(val, quickExMuscle));
+    }
+  };
+
+  const handleQuickMuscleChange = (val: string) => {
+    setQuickExMuscle(val);
+    if (!quickExUserToggledRef.current) {
+      setQuickExUnilateral(isExerciseUnilateral(quickExName, val));
+    }
+  };
 
   // Bulk Text Importer State
   const starterTextTemplate = `# Push (Chest, Shoulders & Triceps)
@@ -46,17 +64,18 @@ Barbell Bench Press (Chest, 3 sets)
 Overhead Shoulder Press (Shoulders, 3 sets)
 Incline Dumbbell Press (Chest, 3 sets)
 Triceps Cable Pushdown (Triceps, 3 sets)
+Dumbbell Lateral Raise (Shoulders, 3 sets, L/R)
 
 # Pull (Back & Biceps)
 Barbell Bent-Over Row (Back, 3 sets)
 Lat Pulldown / Pull-Ups (Back, 3 sets)
-Dumbbell Bicep Curls (Biceps, 3 sets)
+Dumbbell Bicep Curls (Biceps, 3 sets, L/R)
 Face Pulls (Rear Delts, 3 sets)
 
 # Legs & Core
 Barbell Squat (Quads / Glutes, 3 sets)
 Romanian Deadlift (Hamstrings, 3 sets)
-Leg Press / Bulgarian Split Squat (Quads, 3 sets)
+Bulgarian Split Squat (Quads, 3 sets, L/R)
 Standing Calf Raise (Calves, 3 sets)`;
 
   const [bulkText, setBulkText] = useState(starterTextTemplate);
@@ -69,7 +88,7 @@ Standing Calf Raise (Calves, 3 sets)`;
     name: string;
     description: string;
     targetRestDays: number;
-    exercises: { name: string; muscle: string; targetSets: number | '' }[];
+    exercises: { name: string; muscle: string; targetSets: number | ''; isUnilateral?: boolean }[];
   } | null>(null);
 
   const muscleGroups = MUSCLE_GROUPS;
@@ -86,8 +105,11 @@ Standing Calf Raise (Calves, 3 sets)`;
       quickExMuscle,
       setsToSave
     );
+    await setExerciseUnilateral(quickExName.trim(), quickExUnilateral);
 
     setQuickExName('');
+    quickExUserToggledRef.current = false;
+    setQuickExUnilateral(false);
     setQuickAddedFeedback(true);
     setTimeout(() => setQuickAddedFeedback(false), 2000);
   };
@@ -102,11 +124,16 @@ Standing Calf Raise (Calves, 3 sets)`;
       name: target.name,
       description: target.description || '',
       targetRestDays: target.target_rest_days || 3,
-      exercises: (target.exercises || []).map((re) => ({
-        name: re.exercise?.name || 'Exercise',
-        muscle: re.exercise?.target_muscle_group || 'General',
-        targetSets: re.target_sets || 3,
-      })),
+      exercises: (target.exercises || []).map((re) => {
+        const exName = re.exercise?.name || 'Exercise';
+        const exMuscle = re.exercise?.target_muscle_group || 'General';
+        return {
+          name: exName,
+          muscle: exMuscle,
+          targetSets: re.target_sets || 3,
+          isUnilateral: isExerciseUnilateral(exName, exMuscle),
+        };
+      }),
     });
   };
 
@@ -118,6 +145,12 @@ Standing Calf Raise (Calves, 3 sets)`;
       muscle: e.muscle,
       targetSets: Number(e.targetSets) > 0 ? Number(e.targetSets) : 3,
     }));
+    for (const ex of inlineEditingRoutine.exercises) {
+      if (ex.name.trim()) {
+        const uni = ex.isUnilateral !== undefined ? ex.isUnilateral : isExerciseUnilateral(ex.name.trim(), ex.muscle);
+        await setExerciseUnilateral(ex.name.trim(), uni);
+      }
+    }
     await updateRoutine(
       inlineEditingRoutine.id,
       inlineEditingRoutine.name,
@@ -135,7 +168,7 @@ Standing Calf Raise (Calves, 3 sets)`;
       ...inlineEditingRoutine,
       exercises: [
         ...inlineEditingRoutine.exercises,
-        { name: '', muscle: 'General', targetSets: 3 },
+        { name: '', muscle: 'General', targetSets: 3, isUnilateral: false },
       ],
     });
   };
@@ -176,19 +209,26 @@ Standing Calf Raise (Calves, 3 sets)`;
           currentRoutineName = line.replace(/^#+\s*/, '').trim();
           currentRoutineExercises = [];
         } else {
-          // Exercise item line, e.g. "Barbell Bench Press (Chest, 3 sets)" or "Barbell Bench Press"
+          // Exercise item line, e.g. "Barbell Bench Press (Chest, 3 sets)" or "Dumbbell Curl (Biceps, 3 sets, L/R)"
           let exName = line;
           let muscle = 'General';
           let sets = 3;
+          let isUni: boolean | undefined = undefined;
 
           const parenMatch = line.match(/^(.*?)\((.*?)\)$/);
           if (parenMatch) {
             exName = parenMatch[1].trim();
-            const details = parenMatch[2].split(',');
+            const details = parenMatch[2].split(',').map((s) => s.trim());
             if (details[0]) muscle = details[0].trim();
-            if (details[1]) {
-              const numMatch = details[1].match(/\d+/);
-              if (numMatch) sets = parseInt(numMatch[0], 10);
+            for (let i = 1; i < details.length; i++) {
+              const part = details[i];
+              const numMatch = part.match(/\d+/);
+              if (numMatch && !/l\/r|l & r/i.test(part)) {
+                sets = parseInt(numMatch[0], 10);
+              }
+              if (/l\/r|l & r|left\/right|unilateral/i.test(part)) {
+                isUni = true;
+              }
             }
           }
 
@@ -197,7 +237,8 @@ Standing Calf Raise (Calves, 3 sets)`;
               name: exName,
               muscle: muscle || 'General',
               targetSets: sets || 3,
-            });
+              ...(isUni !== undefined ? { isUnilateral: isUni } : {}),
+            } as any);
           }
         }
       }
@@ -215,6 +256,14 @@ Standing Calf Raise (Calves, 3 sets)`;
       if (parsedRoutines.length === 0) {
         setBulkStatusMessage('Error: No valid routines or exercises detected. Check format.');
         return;
+      }
+
+      for (const r of parsedRoutines) {
+        for (const ex of r.exercises as any[]) {
+          if (ex.isUnilateral !== undefined) {
+            await setExerciseUnilateral(ex.name, ex.isUnilateral);
+          }
+        }
       }
 
       await bulkSaveRoutines(parsedRoutines);
@@ -300,22 +349,22 @@ Standing Calf Raise (Calves, 3 sets)`;
           </div>
         </div>
 
-        <form onSubmit={handleQuickAdd} className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center">
-          <div className="sm:col-span-5">
+        <form onSubmit={handleQuickAdd} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+          <div className="sm:col-span-4">
             <input
               type="text"
               required
               placeholder="Exercise name (e.g. Incline Bench Press, Romanian Deadlift)..."
               value={quickExName}
-              onChange={(e) => setQuickExName(e.target.value)}
+              onChange={(e) => handleQuickNameChange(e.target.value)}
               className="w-full bg-[#2d4554] border border-[#3f5d70] rounded-xl px-3 py-2 text-xs text-white placeholder-[#94a3b8] focus:outline-none focus:border-[#8bb4cb]"
             />
           </div>
 
-          <div className="sm:col-span-3">
+          <div className="sm:col-span-2">
             <select
               value={quickExMuscle}
-              onChange={(e) => setQuickExMuscle(e.target.value)}
+              onChange={(e) => handleQuickMuscleChange(e.target.value)}
               className="w-full bg-[#2d4554] border border-[#3f5d70] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#8bb4cb]"
             >
               {muscleGroups.map((m) => (
@@ -338,6 +387,29 @@ Standing Calf Raise (Calves, 3 sets)`;
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="sm:col-span-2">
+            <button
+              type="button"
+              onClick={() => {
+                quickExUserToggledRef.current = true;
+                setQuickExUnilateral(!quickExUnilateral);
+              }}
+              className={`w-full py-2 px-2 rounded-xl text-[11px] font-extrabold border flex items-center justify-center space-x-1 transition ${
+                quickExUnilateral
+                  ? 'bg-[#183446] text-[#8bb4cb] border-[#2e5d7d]'
+                  : 'bg-[#2d4554] text-[#94a3b8] hover:text-white border-[#3f5d70]'
+              }`}
+              title={
+                quickExUnilateral
+                  ? 'Tracking Left & Right sides independently. Click for Bilateral.'
+                  : 'Tracking Bilateral. Click for Left & Right split.'
+              }
+            >
+              <Sparkles className="w-3 h-3 text-[#8bb4cb]" />
+              <span>{quickExUnilateral ? '⚡ L/R Split' : 'Bilateral'}</span>
+            </button>
           </div>
 
           <div className="sm:col-span-2 flex items-center space-x-1.5">
@@ -623,6 +695,36 @@ Standing Calf Raise (Calves, 3 sets)`;
                               <button
                                 type="button"
                                 onClick={() => {
+                                  const curVal = ex.isUnilateral !== undefined ? ex.isUnilateral : isExerciseUnilateral(ex.name, ex.muscle);
+                                  const updated = [...inlineEditingRoutine.exercises];
+                                  updated[exIdx].isUnilateral = !curVal;
+                                  setInlineEditingRoutine({
+                                    ...inlineEditingRoutine,
+                                    exercises: updated,
+                                  });
+                                }}
+                                className={`px-1.5 py-1 rounded text-[10px] font-extrabold border shrink-0 transition flex items-center space-x-1 ${
+                                  (ex.isUnilateral !== undefined ? ex.isUnilateral : isExerciseUnilateral(ex.name, ex.muscle))
+                                    ? 'bg-[#183446] text-[#8bb4cb] border-[#2e5d7d]'
+                                    : 'bg-[#3d5a6c] text-[#94a3b8] hover:text-white border-[#4e7085]'
+                                }`}
+                                title={
+                                  (ex.isUnilateral !== undefined ? ex.isUnilateral : isExerciseUnilateral(ex.name, ex.muscle))
+                                    ? 'Tracking Left & Right sides independently. Click for Bilateral.'
+                                    : 'Tracking Bilateral. Click for Left & Right split.'
+                                }
+                              >
+                                <Sparkles className="w-2.5 h-2.5 text-[#8bb4cb]" />
+                                <span>
+                                  {(ex.isUnilateral !== undefined ? ex.isUnilateral : isExerciseUnilateral(ex.name, ex.muscle))
+                                    ? 'L/R'
+                                    : 'Bi'}
+                                </span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
                                   const updated = inlineEditingRoutine.exercises.filter(
                                     (_, i) => i !== exIdx
                                   );
@@ -744,14 +846,28 @@ Standing Calf Raise (Calves, 3 sets)`;
                                   </div>
 
                                   <div className="flex items-center space-x-2">
-                                    {isUnilateralMovement(exName, re.exercise?.target_muscle_group) && (
-                                      <span
-                                        className="text-[9px] bg-[#183446] text-[#8bb4cb] border border-[#2e5d7d] px-1.5 py-0.5 rounded font-extrabold"
-                                        title="L & R side tracking supported in workout logger"
-                                      >
-                                        ⚡ L & R
-                                      </span>
-                                    )}
+                                    {(() => {
+                                      const isUni = isExerciseUnilateral(exName, re.exercise?.target_muscle_group);
+                                      return (
+                                        <button
+                                          type="button"
+                                          onClick={() => setExerciseUnilateral(exName, !isUni)}
+                                          className={`text-[9px] px-2 py-0.5 rounded-md font-extrabold flex items-center space-x-1 border transition ${
+                                            isUni
+                                              ? 'bg-[#183446] hover:bg-[#20445c] text-[#8bb4cb] border-[#2e5d7d]'
+                                              : 'bg-[#3d5a6c] hover:bg-[#4a6b80] text-[#cbd5e1] hover:text-white border-[#4e7085]'
+                                          }`}
+                                          title={
+                                            isUni
+                                              ? 'Tracking Left & Right sides independently. Click to switch to Bilateral.'
+                                              : 'Tracking Bilateral. Click to switch to Left & Right split.'
+                                          }
+                                        >
+                                          <Sparkles className="w-2.5 h-2.5 text-[#8bb4cb]" />
+                                          <span>{isUni ? '⚡ L & R' : 'Bilateral'}</span>
+                                        </button>
+                                      );
+                                    })()}
                                     <span className="text-[#94a3b8] font-mono text-[11px] font-bold">
                                       {re.target_sets} sets
                                     </span>
@@ -802,6 +918,7 @@ Standing Calf Raise (Calves, 3 sets)`;
                   <th className="py-2.5 px-3">Target Muscle</th>
                   <th className="py-2.5 px-3">Assigned Routine Split</th>
                   <th className="py-2.5 px-3 text-center">Target Sets</th>
+                  <th className="py-2.5 px-3 text-center">Tracking Mode</th>
                   <th className="py-2.5 px-3 text-right">Actions</th>
                 </tr>
               </thead>
@@ -828,6 +945,32 @@ Standing Calf Raise (Calves, 3 sets)`;
 
                       <td className="py-2.5 px-3 text-center font-mono font-bold text-white">
                         {re.target_sets} sets
+                      </td>
+
+                      <td className="py-2.5 px-3 text-center">
+                        {(() => {
+                          const exName = re.exercise?.name || 'Exercise';
+                          const isUni = isExerciseUnilateral(exName, re.exercise?.target_muscle_group);
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => setExerciseUnilateral(exName, !isUni)}
+                              className={`text-[10px] px-2.5 py-1 rounded-md font-extrabold inline-flex items-center space-x-1 border transition ${
+                                isUni
+                                  ? 'bg-[#183446] hover:bg-[#20445c] text-[#8bb4cb] border-[#2e5d7d]'
+                                  : 'bg-[#2d4554] hover:bg-[#344e5e] text-[#94a3b8] hover:text-white border-[#3f5d70]'
+                              }`}
+                              title={
+                                isUni
+                                  ? 'Tracking Left & Right sides independently. Click to switch to Bilateral.'
+                                  : 'Tracking Bilateral. Click to switch to Left & Right split.'
+                              }
+                            >
+                              <Sparkles className="w-2.5 h-2.5 text-[#8bb4cb]" />
+                              <span>{isUni ? '⚡ L & R Split' : 'Bilateral'}</span>
+                            </button>
+                          );
+                        })()}
                       </td>
 
                       <td className="py-2.5 px-3 text-right">
@@ -857,7 +1000,7 @@ Standing Calf Raise (Calves, 3 sets)`;
               <span>Bulk Text & Routine Importer</span>
             </h3>
             <p className="text-xs text-[#cbd5e1]">
-              Write or paste your workout routine in simple Markdown list format. Use headers (<code># Routine Name</code>) followed by exercises.
+              Write or paste your workout routine in simple Markdown list format. Use headers (<code># Routine Name</code>) followed by exercises. Add <code>, L/R</code> to enable Left &amp; Right side tracking (e.g. <code>Dumbbell Lateral Raise (Shoulders, 3 sets, L/R)</code>).
             </p>
           </div>
 
@@ -867,7 +1010,7 @@ Standing Calf Raise (Calves, 3 sets)`;
               value={bulkText}
               onChange={(e) => setBulkText(e.target.value)}
               className="w-full bg-[#223541] border border-[#3f5d70] rounded-xl p-4 text-xs font-mono text-white placeholder-[#94a3b8] focus:outline-none focus:border-[#8bb4cb] leading-relaxed"
-              placeholder="# Split Name&#10;Exercise Name (Muscle, 3 sets)&#10;..."
+              placeholder="# Split Name&#10;Exercise Name (Muscle, 3 sets)&#10;Unilateral Movement (Muscle, 3 sets, L/R)&#10;..."
             />
           </div>
 

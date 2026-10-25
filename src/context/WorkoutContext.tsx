@@ -8,7 +8,7 @@ import {
   LastExercisePerformance,
   LogExercisePayload,
 } from '../types/workout';
-import { calculate1RM, getBaseExerciseName, getLimbTypeForMuscle, isUnilateralExercise } from '../lib/calculations';
+import { calculate1RM, getBaseExerciseName, getLimbTypeForMuscle, isUnilateralExercise, isUnilateralMovement } from '../lib/calculations';
 import { STARTER_ROUTINES } from '../lib/starterData';
 
 export interface ExerciseHistoryEntry {
@@ -52,12 +52,16 @@ interface WorkoutContextType {
   deleteRoutine: (routineId: string) => Promise<void>;
   loadStarterRoutines: () => Promise<void>;
   refreshData: () => Promise<void>;
+  unilateralPreferences: Record<string, boolean>;
+  setExerciseUnilateral: (exerciseName: string, isUnilateral: boolean) => Promise<void>;
+  isExerciseUnilateral: (exerciseName: string, muscle?: string) => boolean;
 }
 
 const WorkoutContext = createContext<WorkoutContextType | undefined>(undefined);
 
 const LOCAL_STORAGE_ROUTINES = 'strongtium_routines';
 const LOCAL_STORAGE_SESSIONS = 'strongtium_sessions';
+const LOCAL_STORAGE_UNILATERAL = 'strongtium_unilateral_preferences';
 
 export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
@@ -65,6 +69,87 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [sessions, setSessions] = useState<WorkoutSession[]>([]);
   const [personalRecords, setPersonalRecords] = useState<Record<string, PersonalRecord>>({});
   const [loading, setLoading] = useState(true);
+  const [unilateralPreferences, setUnilateralPreferences] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem(LOCAL_STORAGE_UNILATERAL);
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) {
+      return {};
+    }
+  });
+
+  // Sync user preferences when user authenticates
+  useEffect(() => {
+    if (user?.user_metadata?.unilateral_preferences) {
+      const remotePrefs = user.user_metadata.unilateral_preferences;
+      setUnilateralPreferences((prev) => {
+        const merged = { ...prev, ...remotePrefs };
+        try {
+          localStorage.setItem(LOCAL_STORAGE_UNILATERAL, JSON.stringify(merged));
+          if (user.id) {
+            localStorage.setItem(`${LOCAL_STORAGE_UNILATERAL}_${user.id}`, JSON.stringify(merged));
+          }
+        } catch (e) {
+          // ignore
+        }
+        return merged;
+      });
+    } else if (user?.id) {
+      try {
+        const userSpecific = localStorage.getItem(`${LOCAL_STORAGE_UNILATERAL}_${user.id}`);
+        if (userSpecific) {
+          setUnilateralPreferences(JSON.parse(userSpecific));
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+  }, [user]);
+
+  const setExerciseUnilateral = useCallback(
+    async (exerciseName: string, isUnilateral: boolean) => {
+      const cleanName = getBaseExerciseName(exerciseName).trim().toLowerCase();
+      if (!cleanName) return;
+
+      setUnilateralPreferences((prev) => {
+        const updated = { ...prev, [cleanName]: isUnilateral };
+        try {
+          localStorage.setItem(LOCAL_STORAGE_UNILATERAL, JSON.stringify(updated));
+          if (user?.id) {
+            localStorage.setItem(`${LOCAL_STORAGE_UNILATERAL}_${user.id}`, JSON.stringify(updated));
+          }
+        } catch (e) {
+          console.error('Failed to save unilateral preference', e);
+        }
+        return updated;
+      });
+
+      if (user) {
+        try {
+          const currentMeta = user.user_metadata || {};
+          const currentPrefs = currentMeta.unilateral_preferences || {};
+          await supabase.auth.updateUser({
+            data: {
+              unilateral_preferences: {
+                ...currentPrefs,
+                [cleanName]: isUnilateral,
+              },
+            },
+          });
+        } catch (err) {
+          console.warn('Could not sync unilateral preference to Supabase user metadata:', err);
+        }
+      }
+    },
+    [user]
+  );
+
+  const isExerciseUnilateral = useCallback(
+    (exerciseName: string, muscle?: string) => {
+      return isUnilateralMovement(exerciseName, muscle, unilateralPreferences);
+    },
+    [unilateralPreferences]
+  );
 
   // Compute Personal Records from sessions
   const computePRs = useCallback((allSessions: WorkoutSession[]) => {
@@ -1002,6 +1087,9 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
         deleteRoutine,
         loadStarterRoutines,
         refreshData: fetchData,
+        unilateralPreferences,
+        setExerciseUnilateral,
+        isExerciseUnilateral,
       }}
     >
       {children}

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Plus, Trash2, Dumbbell, Save } from 'lucide-react';
+import { X, Plus, Trash2, Dumbbell, Save, Sparkles } from 'lucide-react';
 import { useWorkout } from '../context/WorkoutContext';
 import { MUSCLE_GROUPS } from '../types/workout';
 
@@ -8,12 +8,12 @@ interface RoutineEditorModalProps {
 }
 
 export const RoutineEditorModal: React.FC<RoutineEditorModalProps> = ({ onClose }) => {
-  const { createRoutine } = useWorkout();
+  const { createRoutine, setExerciseUnilateral, isExerciseUnilateral } = useWorkout();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [restDays, setRestDays] = useState(3);
   const [exercises, setExercises] = useState<
-    { name: string; muscle: string; targetSets: number | '' }[]
+    { name: string; muscle: string; targetSets: number | ''; isUnilateral?: boolean }[]
   >([
     { name: '', muscle: 'General', targetSets: 3 },
   ]);
@@ -29,11 +29,16 @@ export const RoutineEditorModal: React.FC<RoutineEditorModalProps> = ({ onClose 
 
   const handleUpdateExercise = (
     index: number,
-    field: 'name' | 'muscle' | 'targetSets',
+    field: 'name' | 'muscle' | 'targetSets' | 'isUnilateral',
     val: any
   ) => {
     const updated = [...exercises];
-    updated[index] = { ...updated[index], [field]: val };
+    const prev = updated[index];
+    if (field === 'name' && prev.isUnilateral === undefined) {
+      updated[index] = { ...prev, name: val, isUnilateral: isExerciseUnilateral(val, prev.muscle) };
+    } else {
+      updated[index] = { ...prev, [field]: val };
+    }
     setExercises(updated);
   };
 
@@ -58,6 +63,12 @@ export const RoutineEditorModal: React.FC<RoutineEditorModalProps> = ({ onClose 
 
     setIsSubmitting(true);
     try {
+      for (const ex of exercises) {
+        if (ex.name.trim()) {
+          const uni = ex.isUnilateral !== undefined ? ex.isUnilateral : isExerciseUnilateral(ex.name.trim(), ex.muscle);
+          await setExerciseUnilateral(ex.name.trim(), uni);
+        }
+      }
       await createRoutine(name.trim(), description.trim(), restDays, validExercises);
       onClose();
     } catch (err) {
@@ -232,6 +243,31 @@ export const RoutineEditorModal: React.FC<RoutineEditorModalProps> = ({ onClose 
                       +
                     </button>
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const curVal = ex.isUnilateral !== undefined ? ex.isUnilateral : isExerciseUnilateral(ex.name, ex.muscle);
+                      handleUpdateExercise(idx, 'isUnilateral', !curVal);
+                    }}
+                    className={`px-2 py-1 rounded-lg text-[10px] font-extrabold border shrink-0 transition flex items-center space-x-1 ${
+                      (ex.isUnilateral !== undefined ? ex.isUnilateral : isExerciseUnilateral(ex.name, ex.muscle))
+                        ? 'bg-[#183446] text-[#8bb4cb] border-[#2e5d7d]'
+                        : 'bg-[#3d5a6c] text-[#94a3b8] hover:text-white border-[#3f5d70]'
+                    }`}
+                    title={
+                      (ex.isUnilateral !== undefined ? ex.isUnilateral : isExerciseUnilateral(ex.name, ex.muscle))
+                        ? 'Tracking Left & Right sides independently. Click for Bilateral.'
+                        : 'Tracking Bilateral. Click for Left & Right split.'
+                    }
+                  >
+                    <Sparkles className="w-2.5 h-2.5 text-[#8bb4cb]" />
+                    <span>
+                      {(ex.isUnilateral !== undefined ? ex.isUnilateral : isExerciseUnilateral(ex.name, ex.muscle))
+                        ? 'L/R'
+                        : 'Bi'}
+                    </span>
+                  </button>
 
                   {exercises.length > 1 && (
                     <button

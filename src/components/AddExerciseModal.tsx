@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { X, Dumbbell, Plus, Calendar } from 'lucide-react';
 import { useWorkout } from '../context/WorkoutContext';
 import { MUSCLE_GROUPS } from '../types/workout';
-import { toLocalISODate, formatWorkoutDateLabel } from '../lib/calculations';
+import { toLocalISODate, formatWorkoutDateLabel, getLimbTypeForMuscle } from '../lib/calculations';
 
 interface AddExerciseModalProps {
   onClose: () => void;
@@ -15,7 +15,7 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
   defaultRoutineId,
   selectedDate,
 }) => {
-  const { routines, logExerciseSets } = useWorkout();
+  const { routines, logExerciseSets, setExerciseUnilateral, isExerciseUnilateral } = useWorkout();
   const [name, setName] = useState('');
   const [muscle, setMuscle] = useState<string>(MUSCLE_GROUPS[0]);
   const [routineId, setRoutineId] = useState(defaultRoutineId || '');
@@ -23,9 +23,24 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
   const [initialWeight, setInitialWeight] = useState<number | ''>('');
   const [initialReps, setInitialReps] = useState<number | ''>('');
   const [splitSides, setSplitSides] = useState(false);
+  const userManuallyToggledRef = React.useRef(false);
   const [logNow, setLogNow] = useState(false);
   const [logDate, setLogDate] = useState<string>(selectedDate || toLocalISODate());
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleNameChange = (val: string) => {
+    setName(val);
+    if (!userManuallyToggledRef.current) {
+      setSplitSides(isExerciseUnilateral(val, muscle));
+    }
+  };
+
+  const handleMuscleChange = (val: string) => {
+    setMuscle(val);
+    if (!userManuallyToggledRef.current) {
+      setSplitSides(isExerciseUnilateral(name, val));
+    }
+  };
 
   const muscleGroups = MUSCLE_GROUPS;
 
@@ -47,7 +62,13 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
         loggedAt = targetDate.toISOString();
       }
 
-      const namesToCreate = [name.trim()];
+      // Persist custom unilateral preference for this exercise
+      await setExerciseUnilateral(name.trim(), splitSides);
+
+      const limbType = getLimbTypeForMuscle(muscle);
+      const namesToCreate = splitSides
+        ? [`${name.trim()} (Left ${limbType})`, `${name.trim()} (Right ${limbType})`]
+        : [name.trim()];
 
       for (const exName of namesToCreate) {
         if (logNow && (Number(initialWeight) > 0 || Number(initialReps) > 0)) {
@@ -117,7 +138,7 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
               required
               placeholder="e.g. Incline Dumbbell Press, Cable Flys, Romanian Deadlift..."
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => handleNameChange(e.target.value)}
               className="w-full bg-[#2d4554] border border-[#3f5d70] rounded-xl px-3 py-2.5 text-xs text-white placeholder-[#94a3b8] focus:outline-none focus:border-[#8bb4cb]"
             />
           </div>
@@ -127,7 +148,7 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
               <label className="block text-xs font-bold text-white mb-1">Target Muscle</label>
               <select
                 value={muscle}
-                onChange={(e) => setMuscle(e.target.value)}
+                onChange={(e) => handleMuscleChange(e.target.value)}
                 className="w-full bg-[#2d4554] border border-[#3f5d70] rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-[#8bb4cb]"
               >
                 {muscleGroups.map((m) => (
@@ -163,7 +184,10 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
             <input
               type="checkbox"
               checked={splitSides}
-              onChange={(e) => setSplitSides(e.target.checked)}
+              onChange={(e) => {
+                userManuallyToggledRef.current = true;
+                setSplitSides(e.target.checked);
+              }}
               className="w-4 h-4 rounded text-[#8bb4cb] focus:ring-0 cursor-pointer"
             />
           </div>
