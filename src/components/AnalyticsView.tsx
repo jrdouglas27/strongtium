@@ -17,7 +17,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { useWorkout } from '../context/WorkoutContext';
-import { calculate1RM, formatDate } from '../lib/calculations';
+import { calculate1RM, formatDate, getTimeDomain } from '../lib/calculations';
 import { ConsistencyHeatmap } from './ConsistencyHeatmap';
 
 export const AnalyticsView: React.FC = () => {
@@ -49,6 +49,7 @@ export const AnalyticsView: React.FC = () => {
     if (!selectedExercise) return [];
 
     const points: {
+      timestamp: number;
       date: string;
       rawDate: string;
       maxWeight: number;
@@ -58,10 +59,17 @@ export const AnalyticsView: React.FC = () => {
       notes?: string;
     }[] = [];
 
-    const sortedSessions = [...sessions].reverse();
+    const sortedSessions = [...sessions]
+      .filter((s) => s.completed_at || s.started_at)
+      .sort(
+        (a, b) =>
+          new Date(a.completed_at || a.started_at!).getTime() -
+          new Date(b.completed_at || b.started_at!).getTime()
+      );
 
     sortedSessions.forEach((session) => {
-      if (!session.completed_at) return;
+      const dateStr = session.completed_at || session.started_at;
+      if (!dateStr) return;
       const ex = session.logged_exercises?.find(
         (le) => le.exercise_name.trim().toLowerCase() === selectedExercise.trim().toLowerCase()
       );
@@ -87,12 +95,14 @@ export const AnalyticsView: React.FC = () => {
           }
         });
 
+        const d = new Date(dateStr);
         points.push({
-          date: new Date(session.completed_at).toLocaleDateString(undefined, {
+          timestamp: d.getTime(),
+          date: d.toLocaleDateString(undefined, {
             month: 'short',
             day: 'numeric',
           }),
-          rawDate: session.completed_at,
+          rawDate: dateStr,
           maxWeight: maxW,
           estimated1RM: best1RM,
           totalVolume: vol,
@@ -104,6 +114,10 @@ export const AnalyticsView: React.FC = () => {
 
     return points;
   }, [sessions, selectedExercise]);
+
+  const timeDomain = useMemo(() => {
+    return getTimeDomain(chartData.map((p) => p.timestamp));
+  }, [chartData]);
 
   const totalWorkouts = sessions.filter((s) => s.completed_at).length;
 
@@ -182,9 +196,24 @@ export const AnalyticsView: React.FC = () => {
         {chartData.length > 0 ? (
           <div className="h-72 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+              <LineChart data={chartData} margin={{ top: 5, right: 15, left: -20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#4e7085" />
-                <XAxis dataKey="date" stroke="#94a3b8" fontSize={11} tickLine={false} />
+                <XAxis
+                  type="number"
+                  dataKey="timestamp"
+                  domain={timeDomain.domain}
+                  scale="time"
+                  ticks={timeDomain.ticks}
+                  tickFormatter={(val) => {
+                    const d = new Date(val);
+                    return timeDomain.isMultiYear
+                      ? d.toLocaleDateString(undefined, { month: 'short', year: '2-digit' })
+                      : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                  }}
+                  stroke="#94a3b8"
+                  fontSize={11}
+                  tickLine={false}
+                />
                 <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} unit="kg" />
                 <Tooltip
                   contentStyle={{
@@ -197,6 +226,16 @@ export const AnalyticsView: React.FC = () => {
                   }}
                   formatter={(value: any, name: any) => [`${value} kg`, name]}
                   labelStyle={{ color: '#cbd5e1', fontWeight: 'bold' }}
+                  labelFormatter={(val: any) => {
+                    if (!val) return '';
+                    const d = new Date(Number(val));
+                    return d.toLocaleDateString(undefined, {
+                      weekday: 'short',
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    });
+                  }}
                 />
                 <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
                 <Line

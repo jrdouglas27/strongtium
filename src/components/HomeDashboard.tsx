@@ -38,6 +38,7 @@ import {
   formatDate,
   formatRelativeDays,
   calculateRoutineDueStatus,
+  getTimeDomain,
 } from '../lib/calculations';
 import { ConsistencyHeatmap } from './ConsistencyHeatmap';
 
@@ -267,10 +268,23 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
 
   const spotlightChartData = useMemo(() => {
     if (!spotlightExercise) return [];
-    const points: { date: string; maxWeight: number; estimated1RM: number }[] = [];
-    const sorted = [...sessions].filter((s) => s.completed_at).reverse();
+    const points: {
+      timestamp: number;
+      date: string;
+      maxWeight: number;
+      estimated1RM: number;
+    }[] = [];
+    const sorted = [...sessions]
+      .filter((s) => s.completed_at || s.started_at)
+      .sort(
+        (a, b) =>
+          new Date(a.completed_at || a.started_at!).getTime() -
+          new Date(b.completed_at || b.started_at!).getTime()
+      );
 
     sorted.forEach((s) => {
+      const dateStr = s.completed_at || s.started_at;
+      if (!dateStr) return;
       const ex = s.logged_exercises?.find(
         (le) => le.exercise_name.trim().toLowerCase() === spotlightExercise.trim().toLowerCase()
       );
@@ -285,8 +299,10 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
           if (est > best1RM) best1RM = est;
         });
 
+        const d = new Date(dateStr);
         points.push({
-          date: new Date(s.completed_at!).toLocaleDateString(undefined, {
+          timestamp: d.getTime(),
+          date: d.toLocaleDateString(undefined, {
             month: 'short',
             day: 'numeric',
           }),
@@ -297,6 +313,10 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
     });
     return points;
   }, [sessions, spotlightExercise]);
+
+  const spotlightTimeDomain = useMemo(() => {
+    return getTimeDomain(spotlightChartData.map((p) => p.timestamp));
+  }, [spotlightChartData]);
 
   // Recent PR Trophies
   const recentPRs = useMemo(() => {
@@ -644,7 +664,22 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={spotlightChartData} margin={{ top: 5, right: 10, left: -25, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#4e7085" vertical={false} />
-                  <XAxis dataKey="date" stroke="#94a3b8" fontSize={10} tickLine={false} />
+                  <XAxis
+                    type="number"
+                    dataKey="timestamp"
+                    domain={spotlightTimeDomain.domain}
+                    scale="time"
+                    ticks={spotlightTimeDomain.ticks}
+                    tickFormatter={(val) => {
+                      const d = new Date(val);
+                      return spotlightTimeDomain.isMultiYear
+                        ? d.toLocaleDateString(undefined, { month: 'short', year: '2-digit' })
+                        : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                    }}
+                    stroke="#94a3b8"
+                    fontSize={10}
+                    tickLine={false}
+                  />
                   <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} unit="kg" />
                   <Tooltip
                     contentStyle={{
@@ -655,6 +690,16 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
                       color: '#f1f5f9',
                     }}
                     formatter={(value: any, name: any) => [`${value} kg`, name]}
+                    labelFormatter={(labelVal: any) => {
+                      if (!labelVal) return '';
+                      const d = new Date(Number(labelVal));
+                      return d.toLocaleDateString(undefined, {
+                        weekday: 'short',
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                      });
+                    }}
                   />
                   <Line
                     type="monotone"

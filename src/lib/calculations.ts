@@ -254,4 +254,78 @@ export function isUnilateralMovement(
   return false;
 }
 
+/**
+ * Generates continuous, evenly-spaced time ticks (Unix timestamps in ms)
+ * for charts with continuous X axes.
+ */
+export function getTimeTicks(min: number, max: number): number[] {
+  if (min >= max) return [min];
+  const DAY = 86400000;
+  const span = max - min;
+  const spanDays = span / DAY;
+
+  let intervalDays = 1;
+  if (spanDays > 730) intervalDays = 180;
+  else if (spanDays > 365) intervalDays = 90;
+  else if (spanDays > 180) intervalDays = 60;
+  else if (spanDays > 90) intervalDays = 30;
+  else if (spanDays > 45) intervalDays = 14;
+  else if (spanDays > 20) intervalDays = 7;
+  else if (spanDays > 10) intervalDays = 3;
+  else if (spanDays > 4) intervalDays = 2;
+  else intervalDays = 1;
+
+  const intervalMs = intervalDays * DAY;
+
+  // Align starting point to midnight local time
+  const startDate = new Date(min);
+  startDate.setHours(0, 0, 0, 0);
+  let curr = startDate.getTime();
+
+  while (curr + intervalMs <= min) {
+    curr += intervalMs;
+  }
+
+  const ticks: number[] = [];
+  while (curr <= max + intervalMs * 0.1) {
+    if (curr >= min - intervalMs * 0.1) {
+      ticks.push(curr);
+    }
+    curr += intervalMs;
+  }
+
+  if (ticks.length === 0) return [min, max];
+  return ticks;
+}
+
+/**
+ * Calculates domain and clean ticks for a continuous time-series chart.
+ */
+export function getTimeDomain(
+  timestamps: number[]
+): { domain: [number, number]; ticks: number[]; isMultiYear: boolean } {
+  if (!timestamps || timestamps.length === 0) {
+    return { domain: [0, 0], ticks: [], isMultiYear: false };
+  }
+  const min = Math.min(...timestamps);
+  const max = Math.max(...timestamps);
+
+  if (min === max) {
+    const pad = 86400000 * 2; // 2 days padding
+    return {
+      domain: [min - pad, max + pad],
+      ticks: [min],
+      isMultiYear: false,
+    };
+  }
+
+  const span = max - min;
+  const pad = Math.max(span * 0.05, 86400000 * 0.5); // 5% padding, at least 12h
+  const domain: [number, number] = [min - pad, max + pad];
+  const ticks = getTimeTicks(min, max);
+  const isMultiYear = new Date(min).getFullYear() !== new Date(max).getFullYear();
+
+  return { domain, ticks, isMultiYear };
+}
+
 
