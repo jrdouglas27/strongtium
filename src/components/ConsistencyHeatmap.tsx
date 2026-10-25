@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Calendar } from 'lucide-react';
 import { useWorkout } from '../context/WorkoutContext';
-import { toLocalISODate } from '../lib/calculations';
+import { toLocalISODate, formatDate } from '../lib/calculations';
 
 interface ConsistencyHeatmapProps {
   title?: string;
@@ -96,6 +96,22 @@ export const ConsistencyHeatmap: React.FC<ConsistencyHeatmapProps> = ({
     return map;
   }, [sessions, routines]);
 
+  // Identify the earliest recorded workout date across all activity
+  const earliestSessionDateStr = useMemo(() => {
+    let earliest: string | null = null;
+    const todayStr = toLocalISODate(new Date());
+
+    for (const [dateStr, act] of activityMap.entries()) {
+      if (act.count > 0 && dateStr <= todayStr) {
+        if (!earliest || dateStr < earliest) {
+          earliest = dateStr;
+        }
+      }
+    }
+
+    return earliest;
+  }, [activityMap]);
+
   // Compute number of weeks based on selected range
   const numWeeks = useMemo(() => {
     switch (range) {
@@ -111,7 +127,7 @@ export const ConsistencyHeatmap: React.FC<ConsistencyHeatmapProps> = ({
   }, [range]);
 
   // Generate GitHub-style 7-day columns (Monday to Sunday)
-  const { weeks, totalActiveDays, totalTrackedDays, activePercentage } = useMemo(() => {
+  const { weeks, totalActiveDays, totalTrackedDays, activePercentage, firstSessionDate } = useMemo(() => {
     const now = new Date();
     const todayStr = toLocalISODate(now);
 
@@ -181,7 +197,8 @@ export const ConsistencyHeatmap: React.FC<ConsistencyHeatmapProps> = ({
           }
         }
 
-        if (!isFuture) {
+        // Only judge consistency within the period since user's first recorded session
+        if (!isFuture && (!earliestSessionDateStr || dateStr >= earliestSessionDateStr)) {
           pastDaysCount++;
         }
 
@@ -221,8 +238,9 @@ export const ConsistencyHeatmap: React.FC<ConsistencyHeatmapProps> = ({
       totalActiveDays: activeDaysCount,
       totalTrackedDays: pastDaysCount,
       activePercentage: pct,
+      firstSessionDate: earliestSessionDateStr,
     };
-  }, [activityMap, numWeeks]);
+  }, [activityMap, numWeeks, earliestSessionDateStr]);
 
   // Auto-scroll to the right (most recent days) on mount and range change
   useEffect(() => {
@@ -262,7 +280,18 @@ export const ConsistencyHeatmap: React.FC<ConsistencyHeatmapProps> = ({
             </h3>
           </div>
           <p className="text-xs text-[#cbd5e1] font-medium mt-0.5">
-            {totalActiveDays} active workout {totalActiveDays === 1 ? 'day' : 'days'} across {totalTrackedDays} days ({activePercentage}% consistency)
+            {totalTrackedDays > 0 ? (
+              <>
+                {totalActiveDays} active workout {totalActiveDays === 1 ? 'day' : 'days'} across {totalTrackedDays} {totalTrackedDays === 1 ? 'day' : 'days'} ({activePercentage}% consistency)
+                {firstSessionDate && totalTrackedDays < (numWeeks * 7 - 7) && (
+                  <span className="text-[#94a3b8] font-normal ml-1">
+                    • since first session ({formatDate(firstSessionDate)})
+                  </span>
+                )}
+              </>
+            ) : (
+              'No workout sessions logged yet'
+            )}
           </p>
         </div>
 
