@@ -454,18 +454,18 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
           <div className="flex items-center justify-between text-[#8fb89e] text-xs font-bold">
             <span className="flex items-center space-x-1.5">
               <Zap className="w-4 h-4" />
-              <span>Volume (7d)</span>
+              <span>Sets (7d)</span>
             </span>
             <span className="text-[10px] bg-[#2d4554] px-1.5 py-0.5 rounded text-[#cbd5e1] font-mono">
               Past 7 Days
             </span>
           </div>
           <p className="text-2xl sm:text-3xl font-extrabold text-white font-mono">
-            {Math.round(stats.past7DaysVolume).toLocaleString()}
-            <span className="text-xs font-sans text-[#cbd5e1] font-normal ml-1">kg</span>
+            {stats.past7DaysSets}
+            <span className="text-xs font-sans text-[#cbd5e1] font-normal ml-1">sets</span>
           </p>
           <p className="text-[11px] text-[#cbd5e1] font-medium">
-            Across {stats.past7DaysSets} sets completed
+            Across {stats.past7DaysWorkouts} workouts completed
           </p>
         </div>
 
@@ -832,7 +832,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
                 </span>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 pt-1 border-t border-[#3f5d70] text-center">
+              <div className="grid grid-cols-2 gap-2 pt-1 border-t border-[#3f5d70] text-center">
                 <div className="bg-[#3d5a6c] p-2 rounded-xl">
                   <span className="text-[10px] text-[#cbd5e1] block">Exercises</span>
                   <span className="text-sm font-extrabold text-white font-mono">
@@ -843,12 +843,6 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
                   <span className="text-[10px] text-[#cbd5e1] block">Total Sets</span>
                   <span className="text-sm font-extrabold text-white font-mono">
                     {lastSessionStats.setsCount}
-                  </span>
-                </div>
-                <div className="bg-[#3d5a6c] p-2 rounded-xl">
-                  <span className="text-[10px] text-[#cbd5e1] block">Volume</span>
-                  <span className="text-sm font-extrabold text-white font-mono">
-                    {lastSessionStats.volume} kg
                   </span>
                 </div>
               </div>

@@ -15,13 +15,13 @@ import {
 } from 'lucide-react';
 import { useWorkout } from '../context/WorkoutContext';
 import {
-  calculateVolume,
   formatRelativeDays,
   formatDate,
   toLocalISODate,
   formatWorkoutDateLabel,
   getBaseExerciseName,
   getLimbTypeForMuscle,
+  calculateMovementDueStatus,
 } from '../lib/calculations';
 
 interface ExerciseCardProps {
@@ -570,24 +570,23 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
     }
   };
 
-  // Compute Volume
-  const uniLeftVolume = uniSets.reduce(
-    (acc, s) => acc + calculateVolume(Number(s.leftWeight), Number(s.leftReps)),
-    0
-  );
-  const uniRightVolume = uniSets.reduce(
-    (acc, s) => acc + calculateVolume(Number(s.rightWeight), Number(s.rightReps)),
-    0
-  );
-  const totalUniVolume = uniLeftVolume + uniRightVolume;
-
-  const totalBiVolume = biSets.reduce(
-    (acc, s) => acc + calculateVolume(Number(s.weight), Number(s.reps)),
-    0
-  );
-
-  const displayVolume = isUnilateral ? totalUniVolume : totalBiVolume;
   const history = getExerciseHistory(baseName);
+
+  // Compute 3-day repetition cadence status for this movement
+  const lastPerformedMovementDate = useMemo(() => {
+    const dates = [
+      leftPerf?.last_performed_at,
+      rightPerf?.last_performed_at,
+      bilateralPerf?.last_performed_at,
+    ].filter(Boolean) as string[];
+    if (dates.length === 0) return null;
+    dates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+    return dates[0];
+  }, [leftPerf, rightPerf, bilateralPerf]);
+
+  const movementDueStatus = useMemo(() => {
+    return calculateMovementDueStatus(lastPerformedMovementDate, 3);
+  }, [lastPerformedMovementDate]);
 
   return (
     <div className="bg-[#3d5a6c] border border-[#4e7085] rounded-2xl p-4 sm:p-5 shadow-sm space-y-4 hover:border-[#749fb7]/70 transition">
@@ -633,10 +632,32 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
             </button>
           </div>
 
-          <h3 className="text-base sm:text-lg font-extrabold text-white tracking-tight flex items-center space-x-2">
-            <Dumbbell className="w-4 h-4 text-[#8bb4cb] shrink-0" />
-            <span>{baseName}</span>
-          </h3>
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-base sm:text-lg font-extrabold text-white tracking-tight flex items-center space-x-2">
+              <Dumbbell className="w-4 h-4 text-[#8bb4cb] shrink-0" />
+              <span>{baseName}</span>
+            </h3>
+
+            {/* Movement 3-Day Repeat Cadence Pill */}
+            <span
+              className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border flex items-center space-x-1 ${
+                movementDueStatus.status === 'due'
+                  ? movementDueStatus.badgeText.includes('overdue')
+                    ? 'bg-[#422020] text-[#fca5a5] border-[#7f1d1d]'
+                    : 'bg-[#3b2d18] text-[#fcd34d] border-[#78350f]'
+                  : movementDueStatus.status === 'never_done'
+                  ? 'bg-[#183446] text-[#8bb4cb] border-[#2e5d7d]'
+                  : 'bg-[#213543] text-[#94a3b8] border-[#2d4554]'
+              }`}
+              title={
+                lastPerformedMovementDate
+                  ? `Target: repeat every 3 days. Last done: ${formatDate(lastPerformedMovementDate)} (${formatRelativeDays(lastPerformedMovementDate)}).`
+                  : 'No recorded sessions yet for this exercise.'
+              }
+            >
+              <span>{movementDueStatus.badgeText}</span>
+            </span>
+          </div>
         </div>
 
         {/* PR Tag if achieved */}
@@ -767,9 +788,6 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
                 : `${baseLogged?.sets.length || 0} sets saved`}
             </span>
           </div>
-          <span className="font-mono text-[11px] text-white/90">
-            {Math.round(displayVolume)} kg volume
-          </span>
         </div>
       )}
 
@@ -863,7 +881,6 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
               <div className="space-y-1.5 bg-[#253946]/50 p-2.5 rounded-xl border border-[#3a586c]">
                 <div className="flex items-center justify-between text-[10px] font-extrabold text-[#8bb4cb] uppercase tracking-wider px-1">
                   <span>Left {limbType}</span>
-                  <span className="font-mono">{Math.round(uniLeftVolume)}kg</span>
                 </div>
                 {uniSets.map((s, idx) => (
                   <div
@@ -906,7 +923,6 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
               <div className="space-y-1.5 bg-[#253946]/50 p-2.5 rounded-xl border border-[#3a586c]">
                 <div className="flex items-center justify-between text-[10px] font-extrabold text-[#8fb89e] uppercase tracking-wider px-1">
                   <span>Right {limbType}</span>
-                  <span className="font-mono">{Math.round(uniRightVolume)}kg</span>
                 </div>
                 {uniSets.map((s, idx) => (
                   <div
@@ -1338,10 +1354,10 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
                 {isSaving
                   ? 'Saving...'
                   : hasExistingLog
-                  ? `Update ${dateLabel}'s Sets (${Math.round(displayVolume)}kg)`
+                  ? `Update ${dateLabel}'s Sets`
                   : isUnilateral
-                  ? `Log ${dateLabel} (L: ${Math.round(uniLeftVolume)}kg + R: ${Math.round(uniRightVolume)}kg)`
-                  : `Log Sets for ${dateLabel} (${Math.round(displayVolume)}kg)`}
+                  ? `Log Sets for ${dateLabel} (L & R)`
+                  : `Log Sets for ${dateLabel}`}
               </span>
             </>
           )}

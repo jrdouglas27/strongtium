@@ -17,7 +17,12 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { useWorkout } from '../context/WorkoutContext';
-import { calculate1RM, formatDate, getTimeDomain } from '../lib/calculations';
+import {
+  calculate1RM,
+  formatDate,
+  getTimeDomain,
+  calculateNormalizedProgression,
+} from '../lib/calculations';
 import { ConsistencyHeatmap } from './ConsistencyHeatmap';
 
 export const AnalyticsView: React.FC = () => {
@@ -39,11 +44,23 @@ export const AnalyticsView: React.FC = () => {
     exerciseNames[0] || 'Barbell Bench Press'
   );
 
+  // Toggle for progression view mode: individual exercise vs. normalized average growth
+  const [viewMode, setViewMode] = useState<'individual' | 'normalized'>('individual');
+
   React.useEffect(() => {
     if (exerciseNames.length > 0 && !exerciseNames.includes(selectedExercise)) {
       setSelectedExercise(exerciseNames[0]);
     }
   }, [exerciseNames, selectedExercise]);
+
+  // Normalized progression calculation across all exercises
+  const normalizedData = useMemo(() => {
+    return calculateNormalizedProgression(sessions);
+  }, [sessions]);
+
+  const normalizedTimeDomain = useMemo(() => {
+    return getTimeDomain(normalizedData.map((p) => p.timestamp));
+  }, [normalizedData]);
 
   const chartData = useMemo(() => {
     if (!selectedExercise) return [];
@@ -169,31 +186,156 @@ export const AnalyticsView: React.FC = () => {
           <div>
             <h3 className="text-base font-bold text-white tracking-tight flex items-center space-x-2">
               <TrendingUp className="w-4 h-4 text-[#8bb4cb]" />
-              <span>Progression Curves (1RM & Max Weight)</span>
+              <span>
+                {viewMode === 'normalized'
+                  ? 'Composite Strength Progression (Average of All Exercises)'
+                  : 'Progression Curves (1RM & Max Weight)'}
+              </span>
             </h3>
             <p className="text-xs text-[#cbd5e1] font-medium">
-              Calculated via Epley 1RM equation
+              {viewMode === 'normalized'
+                ? 'Tracks your overall percentage strength change over time relative to each exercise’s initial baseline.'
+                : 'Calculated via Epley 1RM equation.'}
             </p>
           </div>
 
-          {/* Exercise Selector */}
-          <div className="relative">
-            <select
-              value={selectedExercise}
-              onChange={(e) => setSelectedExercise(e.target.value)}
-              className="appearance-none bg-[#2d4554] border border-[#3f5d70] text-white text-xs font-bold rounded-xl pl-3.5 pr-8 py-2 focus:outline-none focus:border-[#8bb4cb] cursor-pointer shadow-sm"
-            >
-              {exerciseNames.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="w-3.5 h-3.5 text-[#94a3b8] absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <div className="flex items-center space-x-2 flex-wrap gap-2">
+            {/* View Mode Toggle: Single Movement vs. Normalized Average */}
+            <div className="flex items-center space-x-1 bg-[#2d4554] border border-[#3f5d70] p-1 rounded-xl">
+              <button
+                type="button"
+                onClick={() => setViewMode('individual')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                  viewMode === 'individual'
+                    ? 'bg-[#8bb4cb] text-[#0e2938] shadow-sm'
+                    : 'text-[#cbd5e1] hover:text-white'
+                }`}
+              >
+                By Exercise
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('normalized')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 ${
+                  viewMode === 'normalized'
+                    ? 'bg-[#8bb4cb] text-[#0e2938] shadow-sm'
+                    : 'text-[#cbd5e1] hover:text-white'
+                }`}
+                title="Normalized average growth of all exercises compared to their original baselines"
+              >
+                <span>Normalized Average</span>
+                <span className="text-[10px] bg-[#0e2938]/20 px-1 rounded font-mono font-bold">
+                  All
+                </span>
+              </button>
+            </div>
+
+            {/* Exercise Selector (only shown when viewing individual exercise) */}
+            {viewMode === 'individual' && (
+              <div className="relative">
+                <select
+                  value={selectedExercise}
+                  onChange={(e) => setSelectedExercise(e.target.value)}
+                  className="appearance-none bg-[#2d4554] border border-[#3f5d70] text-white text-xs font-bold rounded-xl pl-3.5 pr-8 py-2 focus:outline-none focus:border-[#8bb4cb] cursor-pointer shadow-sm"
+                >
+                  {exerciseNames.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="w-3.5 h-3.5 text-[#94a3b8] absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
+            )}
           </div>
         </div>
 
-        {chartData.length > 0 ? (
+        {viewMode === 'normalized' ? (
+          normalizedData.length > 0 ? (
+            <div className="space-y-4">
+              <div className="h-72 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={normalizedData} margin={{ top: 5, right: 15, left: -20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#4e7085" />
+                    <XAxis
+                      type="number"
+                      dataKey="timestamp"
+                      domain={normalizedTimeDomain.domain}
+                      scale="time"
+                      ticks={normalizedTimeDomain.ticks}
+                      tickFormatter={(val) => {
+                        const d = new Date(val);
+                        return normalizedTimeDomain.isMultiYear
+                          ? d.toLocaleDateString(undefined, { month: 'short', year: '2-digit' })
+                          : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                      }}
+                      stroke="#94a3b8"
+                      fontSize={11}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      stroke="#94a3b8"
+                      fontSize={11}
+                      tickLine={false}
+                      unit="%"
+                      tickFormatter={(val) => `${val > 0 ? `+${val}` : val}%`}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: '#2d4554',
+                        borderColor: '#3f5d70',
+                        borderRadius: '8px',
+                        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.2)',
+                        fontSize: '12px',
+                        color: '#f1f5f9',
+                      }}
+                      formatter={(value: any, _name: any, item: any) => [
+                        `${Number(value) > 0 ? `+${value}` : value}% (${item.payload.coveredExercisesCount} exercises tracked)`,
+                        'Average Growth vs Baseline',
+                      ]}
+                      labelStyle={{ color: '#cbd5e1', fontWeight: 'bold' }}
+                      labelFormatter={(val: any) => {
+                        if (!val) return '';
+                        const d = new Date(Number(val));
+                        return d.toLocaleDateString(undefined, {
+                          weekday: 'short',
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        });
+                      }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                    <Line
+                      type="monotone"
+                      dataKey="normalizedGrowthPercent"
+                      name="Overall Strength Growth (%)"
+                      stroke="#8fb89e"
+                      strokeWidth={3}
+                      dot={{ r: 4, fill: '#8fb89e', stroke: '#223541' }}
+                      activeDot={{ r: 6 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Informative explanation footnote */}
+              <div className="bg-[#2d4554] border border-[#3f5d70] rounded-xl p-3 text-xs text-[#cbd5e1] space-y-1">
+                <div className="font-bold text-white flex items-center space-x-1.5">
+                  <TrendingUp className="w-3.5 h-3.5 text-[#8fb89e]" />
+                  <span>How Normalized Growth Works:</span>
+                </div>
+                <p>
+                  Every movement's 1RM is benchmarked against its original starting value (100% baseline). Your overall strength score is computed as the average percentage progression across all your started exercises over time, preventing bias from which specific muscles or split you hit on any given day.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="py-12 text-center text-[#cbd5e1] text-xs font-medium">
+              Log multiple workout sessions across your exercises to view your composite normalized growth curve!
+            </div>
+          )
+        ) : chartData.length > 0 ? (
           <div className="h-72 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartData} margin={{ top: 5, right: 15, left: -20, bottom: 5 }}>

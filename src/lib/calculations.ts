@@ -86,6 +86,73 @@ export function calculateRoutineDueStatus(
 }
 
 /**
+ * Calculates due status for an individual exercise/movement based on 3-day recovery rule.
+ * Rule: Exercise is repeated every 3 days. Returns days until repeat or how many days overdue.
+ */
+export function calculateMovementDueStatus(
+  lastPerformedAt: string | null | undefined,
+  targetRestDays: number = 3
+): RoutineDueStatus {
+  if (!lastPerformedAt) {
+    return {
+      status: 'never_done',
+      daysSinceLast: null,
+      daysUntilDue: 0,
+      dueDate: null,
+      badgeText: 'New Movement',
+      badgeColor: 'blue',
+    };
+  }
+
+  const lastDate = new Date(lastPerformedAt);
+  const now = new Date();
+
+  // Reset hours for accurate day-level difference
+  const lastMidnight = new Date(lastDate.getFullYear(), lastDate.getMonth(), lastDate.getDate());
+  const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  const diffTime = todayMidnight.getTime() - lastMidnight.getTime();
+  const daysSinceLast = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+  const daysUntilDue = targetRestDays - daysSinceLast;
+  const dueDate = new Date(lastMidnight.getTime() + targetRestDays * 24 * 60 * 60 * 1000);
+
+  if (daysSinceLast >= targetRestDays) {
+    const overdueDays = daysSinceLast - targetRestDays;
+    let badgeText = 'Repeat Today';
+    if (overdueDays === 1) badgeText = '1 day overdue';
+    else if (overdueDays > 1) badgeText = `${overdueDays} days overdue`;
+
+    return {
+      status: 'due',
+      daysSinceLast,
+      daysUntilDue: 0,
+      dueDate,
+      badgeText,
+      badgeColor: overdueDays > 0 ? 'red' : 'amber',
+    };
+  } else if (daysSinceLast === targetRestDays - 1) {
+    return {
+      status: 'upcoming',
+      daysSinceLast,
+      daysUntilDue: 1,
+      dueDate,
+      badgeText: 'Due in 1 day',
+      badgeColor: 'blue',
+    };
+  } else {
+    return {
+      status: 'upcoming',
+      daysSinceLast,
+      daysUntilDue,
+      dueDate,
+      badgeText: `Due in ${daysUntilDue} days`,
+      badgeColor: 'gray',
+    };
+  }
+}
+
+/**
  * Format date nicely for human display
  */
 export function formatDate(dateString: string | Date | null | undefined): string {
@@ -326,6 +393,143 @@ export function getTimeDomain(
   const isMultiYear = new Date(min).getFullYear() !== new Date(max).getFullYear();
 
   return { domain, ticks, isMultiYear };
+}
+
+export interface NormalizedProgressPoint {
+  timestamp: number;
+  date: string;
+  rawDate: string;
+  normalizedGrowthPercent: number; // e.g. 0% at baseline, +12.5%
+  averageGrowthMultiplier: number; // e.g. 1.00 at baseline, 1.125
+  coveredExercisesCount: number;
+  contributingExercises: string[];
+}
+
+/**
+ * Calculates normalized composite strength progression across all exercises over time.
+ * For every completed session of an exercise, its strength (best 1RM) is compared to its original
+ * baseline 1RM (first recorded session for that exercise).
+ * To prevent bias from whichever specific split/exercises were done on a single day,
+ * values are computed using a sliding coverage window (default 14 days, with carry-forward
+ * of latest known performance for active exercises).
+ */
+export function calculateNormalizedProgression(
+  sessions: {
+    completed_at?: string | null;
+    started_at?: string | null;
+    logged_exercises?: {
+      exercise_name: string;
+      sets: { weight: number; reps: number }[];
+    }[];
+  }[]
+): NormalizedProgressPoint[] {
+  // 1. Gather all exercise performances grouped by exercise and date
+  interface ExPerformance {
+    timestamp: number;
+    rawDate: string;
+    best1RM: number;
+  }
+
+  const exercisePerfs = new Map<string, ExPerformance[]>();
+
+  const sortedSessions = [...sessions]
+    .filter((s) => s.completed_at || s.started_at)
+    .sort(
+      (a, b) =>
+        new Date(a.completed_at || a.started_at!).getTime() -
+        new Date(b.completed_at || b.started_at!).getTime()
+    );
+
+  const distinctSessionTimestamps: { timestamp: number; rawDate: string }[] = [];
+  const seenDates = new Set<string>();
+
+  sortedSessions.forEach((session) => {
+    const dStr = session.completed_at || session.started_at;
+    if (!dStr) return;
+    const d = new Date(dStr);
+    const ts = d.getTime();
+    const dateKey = toLocalISODate(d);
+
+    if (!seenDates.has(dateKey)) {
+      seenDates.add(dateKey);
+      distinctSessionTimestamps.push({ timestamp: ts, rawDate: dateKey });
+    }
+
+    session.logged_exercises?.forEach((le) => {
+      const name = getBaseExerciseName(le.exercise_name || '').trim();
+      if (!name) return;
+
+      let best1RM = 0;
+      le.sets?.forEach((st) => {
+        const w = Number(st.weight) || 0;
+        const r = Number(st.reps) || 0;
+        const est = calculate1RM(w, r);
+        if (est > best1RM) best1RM = est;
+      });
+
+      if (best1RM > 0) {
+        if (!exercisePerfs.has(name)) {
+          exercisePerfs.set(name, []);
+        }
+        exercisePerfs.get(name)!.push({ timestamp: ts, rawDate: dateKey, best1RM });
+      }
+    });
+  });
+
+  if (exercisePerfs.size === 0 || distinctSessionTimestamps.length === 0) {
+    return [];
+  }
+
+  // 2. Determine original baseline 1RM for each exercise
+  const baselineMap = new Map<string, number>();
+  exercisePerfs.forEach((perfs, exName) => {
+    // Sort chronologically
+    perfs.sort((a, b) => a.timestamp - b.timestamp);
+    if (perfs.length > 0) {
+      baselineMap.set(exName, perfs[0].best1RM);
+    }
+  });
+
+  // 3. For each date timestamp, evaluate the normalized score across all exercises
+  // that have started by that date, carrying forward their most recent 1RM.
+  const points: NormalizedProgressPoint[] = [];
+
+  distinctSessionTimestamps.forEach(({ timestamp, rawDate }) => {
+    const ratios: number[] = [];
+    const contributing: string[] = [];
+
+    exercisePerfs.forEach((perfs, exName) => {
+      const baseline = baselineMap.get(exName);
+      if (!baseline || baseline <= 0) return;
+
+      // Find all performances on or before this timestamp
+      const pastOrCurrentPerfs = perfs.filter((p) => p.timestamp <= timestamp);
+      if (pastOrCurrentPerfs.length === 0) return; // Exercise hasn't started yet
+
+      const latestPerf = pastOrCurrentPerfs[pastOrCurrentPerfs.length - 1];
+      const ratio = latestPerf.best1RM / baseline;
+      ratios.push(ratio);
+      contributing.push(exName);
+    });
+
+    if (ratios.length > 0) {
+      const avgRatio = ratios.reduce((sum, r) => sum + r, 0) / ratios.length;
+      const growthPct = Math.round((avgRatio - 1.0) * 1000) / 10; // e.g. +8.5%
+
+      const d = new Date(timestamp);
+      points.push({
+        timestamp,
+        date: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+        rawDate,
+        normalizedGrowthPercent: growthPct,
+        averageGrowthMultiplier: Math.round(avgRatio * 100) / 100,
+        coveredExercisesCount: ratios.length,
+        contributingExercises: contributing,
+      });
+    }
+  });
+
+  return points;
 }
 
 

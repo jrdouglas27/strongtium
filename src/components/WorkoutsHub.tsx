@@ -185,7 +185,6 @@ export const WorkoutsHub: React.FC<WorkoutsHubProps> = ({ onNavigateToRoutines }
 
   const dateActivities = getActivityForDate(selectedDate);
   const totalDateSets = dateActivities.reduce((acc, a) => acc + a.setsCount, 0);
-  const totalDateVolume = dateActivities.reduce((acc, a) => acc + a.totalVolume, 0);
 
   const handleMarkRoutineDone = async (routineId: string) => {
     setMarkingDone(true);
@@ -316,13 +315,6 @@ export const WorkoutsHub: React.FC<WorkoutsHubProps> = ({ onNavigateToRoutines }
                   </span>
                 ))}
               </div>
-            </div>
-
-            <div className="text-right sm:border-l sm:border-[#3c6e54] sm:pl-5">
-              <span className="text-xs text-[#cbd5e1] block font-medium">Total Volume</span>
-              <span className="text-xl font-mono font-extrabold text-white">
-                {Math.round(totalDateVolume)} <span className="text-xs font-sans">kg</span>
-              </span>
             </div>
           </div>
         </div>

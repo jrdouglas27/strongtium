@@ -16,6 +16,23 @@ const AppContent: React.FC = () => {
   const { user, loading } = useAuth();
   const [currentTab, setCurrentTab] = useState<TabType>('home');
 
+  // Prevent scroll wheel on focused numeric inputs from accidentally incrementing/decrementing values
+  React.useEffect(() => {
+    const handleWheel = () => {
+      const activeEl = document.activeElement;
+      if (
+        activeEl &&
+        activeEl.tagName === 'INPUT' &&
+        (activeEl as HTMLInputElement).type === 'number'
+      ) {
+        (activeEl as HTMLElement).blur();
+      }
+    };
+
+    window.addEventListener('wheel', handleWheel, { passive: true });
+    return () => window.removeEventListener('wheel', handleWheel);
+  }, []);
+
   // Loading Session State
   if (loading) {
     return (
