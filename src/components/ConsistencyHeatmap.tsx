@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Calendar } from 'lucide-react';
 import { useWorkout } from '../context/WorkoutContext';
-import { toLocalISODate, formatDate } from '../lib/calculations';
+import { toLocalISODate, formatDate, getBaseExerciseName } from '../lib/calculations';
 
 interface ConsistencyHeatmapProps {
   title?: string;
@@ -64,16 +64,21 @@ export const ConsistencyHeatmap: React.FC<ConsistencyHeatmapProps> = ({
       };
 
       existing.count += 1;
-      if (s.routine_name && !existing.routines.includes(s.routine_name)) {
-        existing.routines.push(s.routine_name);
-      }
 
       (s.logged_exercises || []).forEach((le) => {
+        const baseName = getBaseExerciseName(le.exercise_name);
+        if (baseName && !existing.routines.includes(baseName)) {
+          existing.routines.push(baseName);
+        }
         (le.sets || []).forEach((st) => {
           existing.setsCount += 1;
           existing.volume += (Number(st.weight) || 0) * (Number(st.reps) || 0);
         });
       });
+
+      if (existing.routines.length === 0 && s.routine_name && !existing.routines.includes(s.routine_name)) {
+        existing.routines.push(s.routine_name);
+      }
 
       map.set(dateStr, existing);
     });
@@ -391,7 +396,7 @@ export const ConsistencyHeatmap: React.FC<ConsistencyHeatmapProps> = ({
                           )}`}
                           title={`${day.fullDateLabel}: ${
                             day.count > 0
-                              ? `${day.routines.join(', ') || 'Workout'} (${day.setsCount} sets, ${Math.round(day.volume)}kg)`
+                              ? `${day.routines.join(', ') || 'Workout'} (${day.setsCount} sets)`
                               : 'Rest Day'
                           }`}
                         />
@@ -417,7 +422,7 @@ export const ConsistencyHeatmap: React.FC<ConsistencyHeatmapProps> = ({
               {hoveredDay.count > 0 ? (
                 <span className="text-[#8fb89e] font-semibold text-[11px] flex items-center space-x-1">
                   <span>
-                    {hoveredDay.routines.join(', ') || 'Workout'} • {hoveredDay.setsCount} sets ({Math.round(hoveredDay.volume)}kg vol)
+                    {hoveredDay.routines.join(', ') || 'Workout'} • {hoveredDay.setsCount} sets
                   </span>
                 </span>
               ) : (
@@ -426,7 +431,7 @@ export const ConsistencyHeatmap: React.FC<ConsistencyHeatmapProps> = ({
             </div>
           ) : (
             <span className="text-[11px] text-[#94a3b8]">
-              Hover any square to view workout details & volume
+              Hover any square to view workout movements & sets
             </span>
           )}
         </div>

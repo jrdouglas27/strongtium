@@ -37,8 +37,10 @@ import {
   calculate1RM,
   formatDate,
   formatRelativeDays,
-  calculateRoutineDueStatus,
+  calculateMovementDueStatus,
+  getBaseExerciseName,
   getTimeDomain,
+  getWeightYDomain,
 } from '../lib/calculations';
 import { ConsistencyHeatmap } from './ConsistencyHeatmap';
 
@@ -58,29 +60,60 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
     return 'Athlete';
   }, [user]);
 
-  // Compute status for all routines
-  const routineStatuses = useMemo(() => {
-    return routines.map((r) => ({
-      routine: r,
-      status: calculateRoutineDueStatus(r.last_completed_at, r.target_rest_days || 3),
-    }));
-  }, [routines]);
+  // Compute 3-day repeat cadence across individual movements (rather than muscle group splits)
+  const movementStatuses = useMemo(() => {
+    const names = new Map<string, string>();
+    const lastDates = new Map<string, string>();
 
-  // Find most due routine in rotation
-  const mostDueRoutineInfo = useMemo(() => {
-    if (routineStatuses.length === 0) return null;
-    const dueList = routineStatuses.filter(
-      (c) => c.status.status === 'due' || c.status.status === 'never_done'
-    );
-    if (dueList.length > 0) {
-      dueList.sort((a, b) => (b.status.daysSinceLast || 999) - (a.status.daysSinceLast || 999));
-      return dueList[0];
-    }
-    const upcoming = [...routineStatuses].sort(
-      (a, b) => (a.status.daysUntilDue || 0) - (b.status.daysUntilDue || 0)
-    );
-    return upcoming[0];
-  }, [routineStatuses]);
+    routines.forEach((r) => {
+      (r.exercises || []).forEach((re) => {
+        const base = getBaseExerciseName(re.exercise?.name || '');
+        if (base) names.set(base.toLowerCase(), base);
+      });
+    });
+
+    sessions.forEach((s) => {
+      const sDate = s.completed_at || s.started_at;
+      s.logged_exercises?.forEach((le) => {
+        const base = getBaseExerciseName(le.exercise_name);
+        if (base && le.sets?.length > 0) {
+          const key = base.toLowerCase();
+          if (!names.has(key)) names.set(key, base);
+          if (sDate) {
+            const prev = lastDates.get(key);
+            if (!prev || new Date(sDate).getTime() > new Date(prev).getTime()) {
+              lastDates.set(key, sDate);
+            }
+          }
+        }
+      });
+    });
+
+    const list = Array.from(names.entries()).map(([key, name]) => {
+      const lastDate = lastDates.get(key) || null;
+      const status = calculateMovementDueStatus(lastDate, 3);
+      return { name, status };
+    });
+
+    list.sort((a, b) => {
+      const aIsDue = a.status.status === 'due' ? 0 : a.status.status === 'upcoming' ? 1 : 2;
+      const bIsDue = b.status.status === 'due' ? 0 : b.status.status === 'upcoming' ? 1 : 2;
+      if (aIsDue !== bIsDue) return aIsDue - bIsDue;
+      if (a.status.status === 'due' && b.status.status === 'due') {
+        return (b.status.daysSinceLast || 0) - (a.status.daysSinceLast || 0);
+      }
+      if (a.status.status === 'upcoming' && b.status.status === 'upcoming') {
+        return (a.status.daysUntilDue || 99) - (b.status.daysUntilDue || 99);
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+    return list;
+  }, [routines, sessions]);
+
+  const overdueOrDueMovements = useMemo(() => {
+    return movementStatuses.filter((m) => m.status.status === 'due');
+  }, [movementStatuses]);
 
   // High-Level Momentum Stats (Past 7 Days, Past 30 Days)
   const stats = useMemo(() => {
@@ -318,6 +351,12 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
     return getTimeDomain(spotlightChartData.map((p) => p.timestamp));
   }, [spotlightChartData]);
 
+  const spotlightYDomain = useMemo(() => {
+    return getWeightYDomain(
+      spotlightChartData.flatMap((p) => [p.estimated1RM, p.maxWeight])
+    );
+  }, [spotlightChartData]);
+
   // Recent PR Trophies
   const recentPRs = useMemo(() => {
     return Object.values(personalRecords)
@@ -334,13 +373,27 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
   const lastSessionStats = useMemo(() => {
     if (!lastSession) return null;
     const sets = (lastSession.logged_exercises || []).reduce((acc, ex) => acc + ex.sets.length, 0);
-    const vol = (lastSession.logged_exercises || []).reduce((acc, ex) => {
-      return acc + ex.sets.reduce((sAcc, s) => sAcc + Number(s.weight) * Number(s.reps), 0);
-    }, 0);
+
+    // Group logged exercises by base movement name so unilateral L/R and multi-group logs are summarized cleanly
+    const movementMap = new Map<string, { name: string; setsCount: number; maxWeight: number }>();
+    (lastSession.logged_exercises || []).forEach((ex) => {
+      const baseName = getBaseExerciseName(ex.exercise_name);
+      if (!baseName) return;
+      const key = baseName.toLowerCase();
+      const existing = movementMap.get(key) || { name: baseName, setsCount: 0, maxWeight: 0 };
+      existing.setsCount += ex.sets?.length || 0;
+      ex.sets?.forEach((s) => {
+        const w = Number(s.weight) || 0;
+        if (w > existing.maxWeight) existing.maxWeight = w;
+      });
+      movementMap.set(key, existing);
+    });
+
+    const movements = Array.from(movementMap.values());
     return {
       setsCount: sets,
-      volume: Math.round(vol),
-      exercisesCount: lastSession.logged_exercises?.length || 0,
+      exercisesCount: movements.length,
+      movements,
     };
   }, [lastSession]);
 
@@ -358,19 +411,17 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
               Welcome back, {userGreeting}! 👋
             </h1>
             <p className="text-xs sm:text-sm text-[#cbd5e1] max-w-xl font-medium">
-              {mostDueRoutineInfo ? (
+              {overdueOrDueMovements.length > 0 ? (
                 <>
-                  Your rotation indicates{' '}
+                  You have{' '}
                   <strong className="text-white underline decoration-[#8bb4cb] decoration-2">
-                    {mostDueRoutineInfo.routine.name}
+                    {overdueOrDueMovements.length} movement{overdueOrDueMovements.length === 1 ? '' : 's'}
                   </strong>{' '}
-                  is{' '}
-                  {mostDueRoutineInfo.status.status === 'due' || mostDueRoutineInfo.status.status === 'never_done'
-                    ? 'ready to tackle today!'
-                    : `up next in ${mostDueRoutineInfo.status.daysUntilDue} day(s).`}
+                  due or overdue on your 3-day repeat cycle (including{' '}
+                  <strong className="text-white">{overdueOrDueMovements[0].name}</strong>).
                 </>
               ) : (
-                'Track your compound lifts, master your exercises, and let the 3-day recovery cadence guide your momentum.'
+                'Track your compound lifts, master your movements, and let the 3-day movement repeat cycle guide your momentum.'
               )}
             </p>
           </div>
@@ -388,35 +439,42 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
           </div>
         </div>
 
-        {/* Cadence Splits Status Chips Bar */}
-        {routines.length > 0 && (
+        {/* Movement Repeat Cadence Status Chips Bar */}
+        {movementStatuses.length > 0 && (
           <div className="mt-6 pt-5 border-t border-[#4e7085]/70">
             <div className="text-[11px] font-extrabold text-[#94a3b8] uppercase tracking-wider mb-2.5 flex items-center space-x-1.5">
               <Clock className="w-3.5 h-3.5 text-[#8bb4cb]" />
-              <span>Current Split Cadence (3-Day Cycle Rule)</span>
+              <span>Movement Repeat Cadence (Every 3 Days)</span>
             </div>
             <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-              {routineStatuses.map(({ routine, status }) => {
-                const isDue = status.status === 'due' || status.status === 'never_done';
+              {movementStatuses.slice(0, 10).map(({ name, status }) => {
+                const isOverdue = status.status === 'due' && status.badgeColor === 'red';
+                const isDueToday = status.status === 'due' && status.badgeColor !== 'red';
                 return (
                   <button
-                    key={routine.id}
+                    key={name}
                     onClick={() => onNavigate('workouts')}
                     className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold border transition whitespace-nowrap ${
-                      isDue
+                      isOverdue
+                        ? 'bg-[#cc8d8d]/25 text-[#ffd6d6] border-[#cc8d8d]/60 shadow-sm'
+                        : isDueToday
                         ? 'bg-[#274a38] text-[#8fb89e] border-[#3c6e54] shadow-sm'
                         : 'bg-[#2d4554] text-[#cbd5e1] border-[#3f5d70] hover:text-white'
                     }`}
                   >
-                    {isDue ? (
-                      <Flame className="w-3.5 h-3.5 text-[#8fb89e]" />
+                    {isOverdue || isDueToday ? (
+                      <Flame className={`w-3.5 h-3.5 ${isOverdue ? 'text-[#ffd6d6]' : 'text-[#8fb89e]'}`} />
                     ) : (
                       <CheckCircle2 className="w-3.5 h-3.5 text-[#8bb4cb]" />
                     )}
-                    <span>{routine.name}</span>
+                    <span>{name}</span>
                     <span
                       className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                        isDue ? 'bg-[#1f3a2c] text-white' : 'bg-[#3d5a6c] text-[#94a3b8]'
+                        isOverdue
+                          ? 'bg-[#3b1212]/60 text-[#ffd6d6]'
+                          : isDueToday
+                          ? 'bg-[#1f3a2c] text-white'
+                          : 'bg-[#3d5a6c] text-[#94a3b8]'
                       }`}
                     >
                       {status.badgeText}
@@ -508,10 +566,10 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
         </div>
       </div>
 
-      {/* Main Graphs Grid: Frequency Chart & Lift Spotlight */}
+      {/* Main Graphs Grid: Frequency Chart & Lift Spotlight (Side by Side 50/50, deeper charts) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Workout Frequency Chart (7 cols on large) */}
-        <div className="lg:col-span-7 bg-[#3d5a6c] border border-[#4e7085] rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
+        {/* Workout Frequency Chart (6 cols on large) */}
+        <div className="lg:col-span-6 bg-[#3d5a6c] border border-[#4e7085] rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <div className="flex items-center space-x-2">
@@ -555,7 +613,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
           </div>
 
           {/* Recharts Bar Chart */}
-          <div className="h-64 w-full pt-2">
+          <div className="h-72 sm:h-80 w-full pt-2">
             <ResponsiveContainer width="100%" height="100%">
               {frequencyView === 'weekly' ? (
                 <BarChart data={weeklyFrequencyData} margin={{ top: 10, right: 10, left: -25, bottom: 5 }}>
@@ -624,8 +682,8 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
           </div>
         </div>
 
-        {/* Simplified Analytics Spotlight (5 cols on large) */}
-        <div className="lg:col-span-5 bg-[#3d5a6c] border border-[#4e7085] rounded-3xl p-5 sm:p-6 shadow-sm space-y-4 flex flex-col justify-between">
+        {/* Simplified Analytics Spotlight (6 cols on large, deep progression chart) */}
+        <div className="lg:col-span-6 bg-[#3d5a6c] border border-[#4e7085] rounded-3xl p-5 sm:p-6 shadow-sm space-y-4 flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between gap-2 mb-2">
               <div className="flex items-center space-x-2">
@@ -655,14 +713,14 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
             </div>
 
             <p className="text-xs text-[#cbd5e1] font-medium">
-              Simplified 1RM trend for {spotlightExercise || 'your key lifts'}.
+              1RM & working weight progression for {spotlightExercise || 'your key lifts'}.
             </p>
           </div>
 
           {spotlightChartData.length > 0 ? (
-            <div className="h-52 w-full pt-2">
+            <div className="h-72 sm:h-80 w-full pt-2">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={spotlightChartData} margin={{ top: 5, right: 10, left: -25, bottom: 5 }}>
+                <LineChart data={spotlightChartData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#4e7085" vertical={false} />
                   <XAxis
                     type="number"
@@ -680,7 +738,14 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
                     fontSize={10}
                     tickLine={false}
                   />
-                  <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} unit="kg" />
+                  <YAxis
+                    stroke="#94a3b8"
+                    fontSize={10}
+                    tickLine={false}
+                    unit="kg"
+                    domain={spotlightYDomain}
+                    width={42}
+                  />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: '#2d4554',
@@ -706,17 +771,17 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
                     dataKey="estimated1RM"
                     name="Est. 1RM"
                     stroke="#8bb4cb"
-                    strokeWidth={2.5}
-                    dot={{ r: 3, fill: '#8bb4cb' }}
+                    strokeWidth={3}
+                    dot={{ r: 3.5, fill: '#8bb4cb', stroke: '#0e2938', strokeWidth: 1.5 }}
                   />
                   <Line
                     type="monotone"
                     dataKey="maxWeight"
                     name="Working Weight"
                     stroke="#8fb89e"
-                    strokeWidth={1.5}
-                    strokeDasharray="3 3"
-                    dot={{ r: 2, fill: '#8fb89e' }}
+                    strokeWidth={2}
+                    strokeDasharray="4 4"
+                    dot={{ r: 2.5, fill: '#8fb89e' }}
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -818,12 +883,15 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
               <div className="flex items-start justify-between">
                 <div>
                   <h4 className="text-base font-extrabold text-white">
-                    {lastSession.routine_name}
+                    Workout on {formatDate(lastSession.completed_at)}
                   </h4>
                   <div className="flex items-center space-x-2 text-xs text-[#cbd5e1] font-mono mt-0.5">
                     <Calendar className="w-3.5 h-3.5 text-[#8bb4cb]" />
-                    <span>{formatDate(lastSession.completed_at)}</span>
-                    <span>({formatRelativeDays(lastSession.completed_at)})</span>
+                    <span>{formatRelativeDays(lastSession.completed_at)}</span>
+                    <span>•</span>
+                    <span>
+                      {lastSessionStats.exercisesCount} movement{lastSessionStats.exercisesCount === 1 ? '' : 's'}
+                    </span>
                   </div>
                 </div>
 
@@ -832,9 +900,31 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
                 </span>
               </div>
 
+              {/* Movements performed in this workout */}
+              {lastSessionStats.movements.length > 0 && (
+                <div className="pt-2 border-t border-[#3f5d70] space-y-1.5">
+                  <span className="text-[10px] font-extrabold text-[#94a3b8] uppercase tracking-wider block">
+                    Movements Performed
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {lastSessionStats.movements.map((m) => (
+                      <div
+                        key={m.name}
+                        className="bg-[#3d5a6c] border border-[#4e7085] rounded-xl px-2.5 py-1.5 text-xs flex items-center space-x-2"
+                      >
+                        <span className="font-bold text-white">{m.name}</span>
+                        <span className="text-[10px] font-mono text-[#cbd5e1] bg-[#2d4554] px-1.5 py-0.5 rounded">
+                          {m.setsCount} sets{m.maxWeight > 0 ? ` • ${m.maxWeight}kg` : ''}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-2 pt-1 border-t border-[#3f5d70] text-center">
                 <div className="bg-[#3d5a6c] p-2 rounded-xl">
-                  <span className="text-[10px] text-[#cbd5e1] block">Exercises</span>
+                  <span className="text-[10px] text-[#cbd5e1] block">Movements</span>
                   <span className="text-sm font-extrabold text-white font-mono">
                     {lastSessionStats.exercisesCount}
                   </span>
@@ -924,7 +1014,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
               <span>Configuration</span>
               <ArrowRight className="w-3.5 h-3.5 text-[#94a3b8] group-hover:translate-x-0.5 transition" />
             </div>
-            <p className="text-[10px] text-[#cbd5e1]">Manage splits & cycle</p>
+            <p className="text-[10px] text-[#cbd5e1]">Manage exercises & groups</p>
           </div>
         </button>
       </div>
@@ -933,15 +1023,15 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate }) => {
       {routines.length === 0 && (
         <div className="bg-[#3d5a6c] border border-[#4e7085] rounded-3xl p-6 text-center space-y-3">
           <Sparkles className="w-8 h-8 text-[#8bb4cb] mx-auto" />
-          <h3 className="font-extrabold text-base text-white">No Routines Set Up Yet</h3>
+          <h3 className="font-extrabold text-base text-white">No Exercise Groups Set Up Yet</h3>
           <p className="text-xs text-[#cbd5e1] max-w-sm mx-auto font-medium">
-            Load our pre-configured Push / Pull / Legs starter splits to start tracking with zero hassle!
+            Load our pre-configured Push / Pull / Legs / Core starter exercises to start tracking with zero hassle!
           </p>
           <button
             onClick={() => loadStarterRoutines()}
             className="inline-flex items-center space-x-1.5 bg-[#8bb4cb] text-[#0e2938] border border-[#749fb7] text-xs font-extrabold px-4 py-2.5 rounded-xl shadow-sm hover:bg-[#749fb7] transition"
           >
-            <span>Load Push / Pull / Legs Starter Plan</span>
+            <span>Load Push / Pull / Legs / Core Starter Plan</span>
           </button>
         </div>
       )}

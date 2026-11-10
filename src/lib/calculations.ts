@@ -254,12 +254,28 @@ export function isUnilateralExercise(name: string): {
 }
 
 /**
- * Determines whether a muscle group typically splits by Arm or Leg
+ * Determines whether a movement or group typically splits by Arm or Leg
  */
-export function getLimbTypeForMuscle(muscle: string): 'Arm' | 'Leg' {
-  const lower = (muscle || '').toLowerCase();
-  const legMuscles = ['quad', 'hamstring', 'calf', 'calves', 'shin', 'feet', 'ankle', 'glute', 'leg'];
-  const isLeg = legMuscles.some((m) => lower.includes(m));
+export function getLimbTypeForMuscle(muscle?: string, exerciseName?: string): 'Arm' | 'Leg' {
+  const lower = `${muscle || ''} ${exerciseName || ''}`.toLowerCase();
+  const legKeywords = [
+    'quad',
+    'hamstring',
+    'calf',
+    'calves',
+    'shin',
+    'feet',
+    'ankle',
+    'glute',
+    'leg',
+    'squat',
+    'lunge',
+    'deadlift',
+    'rdl',
+    'step up',
+    'bulgarian',
+  ];
+  const isLeg = legKeywords.some((m) => lower.includes(m));
   return isLeg ? 'Leg' : 'Arm';
 }
 
@@ -530,6 +546,53 @@ export function calculateNormalizedProgression(
   });
 
   return points;
+}
+
+/**
+ * Computes a tight Y-axis domain [min, max] for weight / 1RM charts
+ * so progression curves use the full vertical depth of the chart instead of flattening near the top.
+ */
+export function getWeightYDomain(values: number[]): [number, number] {
+  const valid = values.filter((v) => Number.isFinite(v) && v > 0);
+  if (valid.length === 0) return [0, 100];
+
+  const min = Math.min(...valid);
+  const max = Math.max(...valid);
+  const span = max - min;
+
+  if (span === 0) {
+    const pad = Math.max(2, Math.round(min * 0.1));
+    return [Math.max(0, Math.floor(min - pad)), Math.ceil(max + pad)];
+  }
+
+  const bottomPad = Math.max(1, span * 0.2);
+  const topPad = Math.max(1, span * 0.15);
+
+  const lower = Math.max(0, Math.floor((min - bottomPad) * 2) / 2);
+  const upper = Math.ceil((max + topPad) * 2) / 2;
+
+  return [lower, upper];
+}
+
+/**
+ * Computes a tight Y-axis domain [min, max] for percentage growth charts.
+ */
+export function getPercentYDomain(values: number[]): [number, number] {
+  const valid = values.filter((v) => Number.isFinite(v));
+  if (valid.length === 0) return [0, 10];
+
+  const min = Math.min(0, ...valid);
+  const max = Math.max(0, ...valid);
+  const span = max - min;
+
+  if (span === 0) {
+    return [-2, 10];
+  }
+
+  const bottomPad = min < 0 ? Math.max(1, span * 0.15) : Math.max(0.5, span * 0.08);
+  const topPad = Math.max(1.5, span * 0.15);
+
+  return [Math.floor(min - bottomPad), Math.ceil(max + topPad)];
 }
 
 

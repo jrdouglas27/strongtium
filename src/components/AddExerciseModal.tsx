@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { X, Dumbbell, Plus, Calendar } from 'lucide-react';
 import { useWorkout } from '../context/WorkoutContext';
-import { MUSCLE_GROUPS } from '../types/workout';
 import { toLocalISODate, formatWorkoutDateLabel, getLimbTypeForMuscle } from '../lib/calculations';
 
 interface AddExerciseModalProps {
@@ -17,7 +16,6 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
 }) => {
   const { routines, logExerciseSets, setExerciseUnilateral, isExerciseUnilateral } = useWorkout();
   const [name, setName] = useState('');
-  const [muscle, setMuscle] = useState<string>(MUSCLE_GROUPS[0]);
   const [routineId, setRoutineId] = useState(defaultRoutineId || '');
   const [targetSets, setTargetSets] = useState<number | ''>(3);
   const [initialWeight, setInitialWeight] = useState<number | ''>('');
@@ -28,21 +26,15 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
   const [logDate, setLogDate] = useState<string>(selectedDate || toLocalISODate());
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const selectedRoutine = routines.find((r) => r.id === routineId);
+  const effectiveGroup = selectedRoutine?.name || 'General';
+
   const handleNameChange = (val: string) => {
     setName(val);
     if (!userManuallyToggledRef.current) {
-      setSplitSides(isExerciseUnilateral(val, muscle));
+      setSplitSides(isExerciseUnilateral(val, effectiveGroup));
     }
   };
-
-  const handleMuscleChange = (val: string) => {
-    setMuscle(val);
-    if (!userManuallyToggledRef.current) {
-      setSplitSides(isExerciseUnilateral(name, val));
-    }
-  };
-
-  const muscleGroups = MUSCLE_GROUPS;
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,8 +42,6 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
 
     setIsSubmitting(true);
     try {
-      const selectedRoutine = routines.find((r) => r.id === routineId);
-
       const now = new Date();
       let loggedAt: string;
       if (logDate === toLocalISODate()) {
@@ -65,7 +55,7 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
       // Persist custom unilateral preference for this exercise
       await setExerciseUnilateral(name.trim(), splitSides);
 
-      const limbType = getLimbTypeForMuscle(muscle);
+      const limbType = getLimbTypeForMuscle(effectiveGroup, name.trim());
       const namesToCreate = splitSides
         ? [`${name.trim()} (Left ${limbType})`, `${name.trim()} (Right ${limbType})`]
         : [name.trim()];
@@ -74,7 +64,7 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
         if (logNow && (Number(initialWeight) > 0 || Number(initialReps) > 0)) {
           await logExerciseSets({
             exerciseName: exName,
-            targetMuscleGroup: muscle,
+            targetMuscleGroup: effectiveGroup,
             routineId: routineId || undefined,
             routineName: selectedRoutine?.name || undefined,
             loggedAt,
@@ -87,7 +77,7 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
         } else {
           await logExerciseSets({
             exerciseName: exName,
-            targetMuscleGroup: muscle,
+            targetMuscleGroup: effectiveGroup,
             routineId: routineId || undefined,
             routineName: selectedRoutine?.name || undefined,
             loggedAt,
@@ -119,7 +109,7 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
             </div>
             <div>
               <h3 className="text-base font-extrabold text-white">Add New Exercise</h3>
-              <p className="text-xs text-[#cbd5e1] font-medium">Create and track an exercise</p>
+              <p className="text-xs text-[#cbd5e1] font-medium">Create and track a movement</p>
             </div>
           </div>
           <button
@@ -143,37 +133,20 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-white mb-1">Target Muscle</label>
-              <select
-                value={muscle}
-                onChange={(e) => handleMuscleChange(e.target.value)}
-                className="w-full bg-[#2d4554] border border-[#3f5d70] rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-[#8bb4cb]"
-              >
-                {muscleGroups.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-white mb-1">Assign to Routine (Optional)</label>
-              <select
-                value={routineId}
-                onChange={(e) => setRoutineId(e.target.value)}
-                className="w-full bg-[#2d4554] border border-[#3f5d70] rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-[#8bb4cb]"
-              >
-                <option value="">No Routine (Standalone)</option>
-                {routines.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <div>
+            <label className="block text-xs font-bold text-white mb-1">Navigation Group (Optional)</label>
+            <select
+              value={routineId}
+              onChange={(e) => setRoutineId(e.target.value)}
+              className="w-full bg-[#2d4554] border border-[#3f5d70] rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-[#8bb4cb]"
+            >
+              <option value="">No Group (Standalone)</option>
+              {routines.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="flex items-center justify-between bg-[#2d4554] border border-[#3f5d70] rounded-xl p-3">

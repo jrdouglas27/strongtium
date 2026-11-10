@@ -8,7 +8,7 @@ import {
   MessageSquareQuote,
 } from 'lucide-react';
 import { useWorkout } from '../context/WorkoutContext';
-import { calculate1RM, formatDate } from '../lib/calculations';
+import { calculate1RM, formatDate, getBaseExerciseName } from '../lib/calculations';
 
 export const HistoryView: React.FC = () => {
   const { sessions } = useWorkout();
@@ -34,7 +34,7 @@ export const HistoryView: React.FC = () => {
           <Dumbbell className="w-10 h-10 text-[#94a3b8] mx-auto mb-3" />
           <h3 className="text-base font-bold text-white">No logged workouts yet</h3>
           <p className="text-xs text-[#cbd5e1] mt-1 max-w-sm mx-auto font-medium">
-            When you complete a routine, your sets, reps, and reflections will be archived here for
+            When you log sets for your movements, your sets, reps, and reflections will be archived here for
             set-by-set drilldown.
           </p>
         </div>
@@ -43,16 +43,17 @@ export const HistoryView: React.FC = () => {
           {completedSessions.map((session) => {
             const isExpanded = expandedSessionId === session.id;
 
-            const totalVol = (session.logged_exercises || []).reduce((acc, ex) => {
-              return (
-                acc +
-                ex.sets.reduce((sAcc, s) => sAcc + Number(s.weight) * Number(s.reps), 0)
-              );
-            }, 0);
-
             const totalSets = (session.logged_exercises || []).reduce(
               (acc, ex) => acc + ex.sets.length,
               0
+            );
+
+            const movementNames = Array.from(
+              new Set(
+                (session.logged_exercises || [])
+                  .map((ex) => getBaseExerciseName(ex.exercise_name))
+                  .filter(Boolean)
+              )
             );
 
             return (
@@ -65,13 +66,28 @@ export const HistoryView: React.FC = () => {
                   onClick={() => setExpandedSessionId(isExpanded ? null : session.id)}
                   className="w-full text-left p-4 sm:p-5 flex items-center justify-between hover:bg-[#344e5e] transition"
                 >
-                  <div className="space-y-1">
-                    <div className="flex items-center space-x-2">
-                      <h3 className="text-base font-bold text-white">{session.routine_name}</h3>
+                  <div className="space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-base font-bold text-white">
+                        Workout — {formatDate(session.completed_at)}
+                      </h3>
                       <span className="bg-[#8bb4cb] text-[#0e2938] font-mono text-[11px] font-bold px-2 py-0.5 rounded-md border border-[#749fb7]">
-                        {totalSets} sets
+                        {movementNames.length} movement{movementNames.length === 1 ? '' : 's'} • {totalSets} sets
                       </span>
                     </div>
+
+                    {movementNames.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {movementNames.map((mName) => (
+                          <span
+                            key={mName}
+                            className="bg-[#2d4554] text-[#cbd5e1] border border-[#3f5d70] text-[11px] font-bold px-2 py-0.5 rounded-lg"
+                          >
+                            {mName}
+                          </span>
+                        ))}
+                      </div>
+                    )}
 
                     <div className="flex items-center space-x-3 text-xs text-[#cbd5e1] font-mono font-medium">
                       <span className="flex items-center space-x-1">
@@ -88,8 +104,6 @@ export const HistoryView: React.FC = () => {
                           })}
                         </span>
                       </span>
-                      <span>•</span>
-                      <span>{Math.round(totalVol)} kg volume</span>
                     </div>
                   </div>
 

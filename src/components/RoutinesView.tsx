@@ -9,14 +9,12 @@ import {
   FileText,
   Check,
   Edit2,
-  Calendar,
   Save,
   HelpCircle,
   FolderSync,
 } from 'lucide-react';
 import { useWorkout } from '../context/WorkoutContext';
 import { RoutineEditorModal } from './RoutineEditorModal';
-import { MUSCLE_GROUPS } from '../types/workout';
 import { isUnilateralExercise } from '../lib/calculations';
 
 export const RoutinesView: React.FC = () => {
@@ -37,46 +35,46 @@ export const RoutinesView: React.FC = () => {
 
   // Quick Add Exercise State
   const [quickExName, setQuickExName] = useState('');
-  const [quickExMuscle, setQuickExMuscle] = useState('Chest');
   const [quickExRoutineId, setQuickExRoutineId] = useState(routines[0]?.id || '');
   const [quickExSets, setQuickExSets] = useState<number | ''>(3);
   const [quickExUnilateral, setQuickExUnilateral] = useState(false);
   const quickExUserToggledRef = React.useRef(false);
   const [quickAddedFeedback, setQuickAddedFeedback] = useState(false);
 
+  const selectedQuickRoutine = routines.find((r) => r.id === quickExRoutineId);
+  const effectiveQuickGroup = selectedQuickRoutine?.name || 'General';
+
   const handleQuickNameChange = (val: string) => {
     setQuickExName(val);
     if (!quickExUserToggledRef.current) {
-      setQuickExUnilateral(isExerciseUnilateral(val, quickExMuscle));
-    }
-  };
-
-  const handleQuickMuscleChange = (val: string) => {
-    setQuickExMuscle(val);
-    if (!quickExUserToggledRef.current) {
-      setQuickExUnilateral(isExerciseUnilateral(quickExName, val));
+      setQuickExUnilateral(isExerciseUnilateral(val, effectiveQuickGroup));
     }
   };
 
   // Bulk Text Importer State
-  const starterTextTemplate = `# Push (Chest, Shoulders & Triceps)
-Barbell Bench Press (Chest, 3 sets)
-Overhead Shoulder Press (Shoulders, 3 sets)
-Incline Dumbbell Press (Chest, 3 sets)
-Triceps Cable Pushdown (Triceps, 3 sets)
-Dumbbell Lateral Raise (Shoulders, 3 sets, L/R)
+  const starterTextTemplate = `# Push
+Barbell Bench Press (3 sets)
+Overhead Shoulder Press (3 sets)
+Incline Dumbbell Press (3 sets)
+Triceps Cable Pushdown (3 sets)
+Dumbbell Lateral Raise (3 sets, L/R)
 
-# Pull (Back & Biceps)
-Barbell Bent-Over Row (Back, 3 sets)
-Lat Pulldown / Pull-Ups (Back, 3 sets)
-Dumbbell Bicep Curls (Biceps, 3 sets, L/R)
-Face Pulls (Rear Delts, 3 sets)
+# Pull
+Barbell Bent-Over Row (3 sets)
+Lat Pulldown / Pull-Ups (3 sets)
+Dumbbell Bicep Curls (3 sets, L/R)
+Face Pulls (3 sets)
 
-# Legs & Core
-Barbell Squat (Quads / Glutes, 3 sets)
-Romanian Deadlift (Hamstrings, 3 sets)
-Bulgarian Split Squat (Quads, 3 sets, L/R)
-Standing Calf Raise (Calves, 3 sets)`;
+# Legs
+Barbell Squat (3 sets)
+Romanian Deadlift (3 sets)
+Bulgarian Split Squat (3 sets, L/R)
+Standing Calf Raise (3 sets)
+
+# Core
+Hanging Leg Raise (3 sets)
+Ab Crunch / Cable Crunch (3 sets)
+Plank / Ab Wheel Rollout (3 sets)`;
 
   const [bulkText, setBulkText] = useState(starterTextTemplate);
   const [bulkStatusMessage, setBulkStatusMessage] = useState<string | null>(null);
@@ -91,8 +89,6 @@ Standing Calf Raise (Calves, 3 sets)`;
     exercises: { name: string; muscle: string; targetSets: number | ''; isUnilateral?: boolean }[];
   } | null>(null);
 
-  const muscleGroups = MUSCLE_GROUPS;
-
   // Handle Quick Add Exercise
   const handleQuickAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -102,7 +98,7 @@ Standing Calf Raise (Calves, 3 sets)`;
     await addOrUpdateExerciseToRoutine(
       quickExRoutineId,
       quickExName.trim(),
-      quickExMuscle,
+      effectiveQuickGroup,
       setsToSave
     );
     await setExerciseUnilateral(quickExName.trim(), quickExUnilateral);
@@ -284,10 +280,10 @@ Standing Calf Raise (Calves, 3 sets)`;
         <div>
           <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight flex items-center space-x-2">
             <Layers className="w-5 h-5 text-[#8bb4cb]" />
-            <span>Exercise & Routine Configuration</span>
+            <span>Exercise & Group Configuration</span>
           </h2>
           <p className="text-xs text-[#cbd5e1] font-medium mt-0.5">
-            Define, write out, organize, and map exercises to your routine splits (Push, Pull, Legs, Custom).
+            Define, write out, and organize your movements into navigation groups (Push, Pull, Legs, Core, Custom).
           </p>
         </div>
 
@@ -302,7 +298,7 @@ Standing Calf Raise (Calves, 3 sets)`;
             }`}
           >
             <Layers className="w-3.5 h-3.5" />
-            <span>Splits</span>
+            <span>Groups</span>
           </button>
 
           <button
@@ -336,7 +332,7 @@ Standing Calf Raise (Calves, 3 sets)`;
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-bold uppercase tracking-wider text-[#8bb4cb] flex items-center space-x-1.5">
             <Plus className="w-3.5 h-3.5" />
-            <span>Quick Add / Map Exercise to Routine</span>
+            <span>Quick Add Exercise to Group</span>
           </h3>
 
           <div className="flex items-center space-x-2">
@@ -344,13 +340,13 @@ Standing Calf Raise (Calves, 3 sets)`;
               onClick={() => setShowEditor(true)}
               className="text-xs text-white font-bold bg-[#2d4554] hover:bg-[#223541] border border-[#3f5d70] px-3 py-1.5 rounded-lg transition"
             >
-              + New Routine Split
+              + New Group
             </button>
           </div>
         </div>
 
         <form onSubmit={handleQuickAdd} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
-          <div className="sm:col-span-4">
+          <div className="sm:col-span-5">
             <input
               type="text"
               required
@@ -361,21 +357,7 @@ Standing Calf Raise (Calves, 3 sets)`;
             />
           </div>
 
-          <div className="sm:col-span-2">
-            <select
-              value={quickExMuscle}
-              onChange={(e) => handleQuickMuscleChange(e.target.value)}
-              className="w-full bg-[#2d4554] border border-[#3f5d70] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#8bb4cb]"
-            >
-              {muscleGroups.map((m) => (
-                <option key={m} value={m}>
-                  {m} Group
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="sm:col-span-2">
+          <div className="sm:col-span-3">
             <select
               value={quickExRoutineId}
               onChange={(e) => setQuickExRoutineId(e.target.value)}
@@ -478,22 +460,22 @@ Standing Calf Raise (Calves, 3 sets)`;
         </form>
       </div>
 
-      {/* VIEW 1: SPLITS VIEW */}
+      {/* VIEW 1: GROUPS VIEW */}
       {activeViewMode === 'splits' && (
         <div className="space-y-4">
           {routines.length === 0 ? (
             <div className="bg-[#3d5a6c] border border-[#4e7085] rounded-2xl p-10 text-center space-y-3">
               <Dumbbell className="w-10 h-10 text-[#94a3b8] mx-auto" />
-              <h3 className="font-bold text-base text-white">No Routines Configured Yet</h3>
+              <h3 className="font-bold text-base text-white">No Exercise Groups Configured Yet</h3>
               <p className="text-xs text-[#cbd5e1] max-w-sm mx-auto font-medium">
-                Create a split or load the starter Push / Pull / Legs routine presets.
+                Create a group or load the starter Push / Pull / Legs / Core presets.
               </p>
               <button
                 onClick={() => loadStarterRoutines()}
                 className="inline-flex items-center space-x-1.5 bg-[#8bb4cb] text-[#0e2938] border border-[#749fb7] text-xs font-bold px-4 py-2.5 rounded-xl shadow-sm hover:bg-[#749fb7]"
               >
                 <Sparkles className="w-4 h-4" />
-                <span>Load Push / Pull / Legs</span>
+                <span>Load Push / Pull / Legs / Core</span>
               </button>
             </div>
           ) : (
@@ -507,49 +489,26 @@ Standing Calf Raise (Calves, 3 sets)`;
                       key={routine.id}
                       className="bg-[#3d5a6c] border-2 border-[#8bb4cb] rounded-2xl p-5 shadow-md space-y-4"
                     >
-                      <div className="space-y-2">
-                        <label className="block text-xs font-bold text-white uppercase tracking-wider">
-                          Edit Routine Split Name
-                        </label>
-                        <input
-                          type="text"
-                          value={inlineEditingRoutine.name}
-                          onChange={(e) =>
-                            setInlineEditingRoutine({
-                              ...inlineEditingRoutine,
-                              name: e.target.value,
-                            })
-                          }
-                          className="w-full bg-[#2d4554] border border-[#3f5d70] rounded-xl px-3 py-2 text-sm font-bold text-white"
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <div>
-                          <label className="block text-[11px] font-bold text-[#cbd5e1] mb-1">
-                            Cadence (Rest Days)
+                          <label className="block text-xs font-bold text-white uppercase tracking-wider mb-1">
+                            Group Name
                           </label>
-                          <select
-                            value={inlineEditingRoutine.targetRestDays}
+                          <input
+                            type="text"
+                            value={inlineEditingRoutine.name}
                             onChange={(e) =>
                               setInlineEditingRoutine({
                                 ...inlineEditingRoutine,
-                                targetRestDays: parseInt(e.target.value, 10),
+                                name: e.target.value,
                               })
                             }
-                            className="w-full bg-[#2d4554] border border-[#3f5d70] rounded-xl px-3 py-1.5 text-xs text-white"
-                          >
-                            <option value={1}>Every 1 Day</option>
-                            <option value={2}>Every 2 Days</option>
-                            <option value={3}>Every 3 Days</option>
-                            <option value={4}>Every 4 Days</option>
-                            <option value={5}>Every 5 Days</option>
-                            <option value={7}>Every 7 Days</option>
-                          </select>
+                            className="w-full bg-[#2d4554] border border-[#3f5d70] rounded-xl px-3 py-1.5 text-sm font-bold text-white"
+                          />
                         </div>
 
                         <div>
-                          <label className="block text-[11px] font-bold text-[#cbd5e1] mb-1">
+                          <label className="block text-xs font-bold text-[#cbd5e1] uppercase tracking-wider mb-1">
                             Description
                           </label>
                           <input
@@ -561,13 +520,13 @@ Standing Calf Raise (Calves, 3 sets)`;
                                 description: e.target.value,
                               })
                             }
-                            placeholder="Split focus..."
+                            placeholder="Group description..."
                             className="w-full bg-[#2d4554] border border-[#3f5d70] rounded-xl px-3 py-1.5 text-xs text-white"
                           />
                         </div>
                       </div>
 
-                      {/* Exercises in Routine */}
+                      {/* Exercises in Group */}
                       <div className="space-y-2 pt-1">
                         <div className="flex items-center justify-between">
                           <label className="text-xs font-bold text-white uppercase tracking-wider">
@@ -603,25 +562,6 @@ Standing Calf Raise (Calves, 3 sets)`;
                                 }}
                                 className="flex-1 bg-[#3d5a6c] border border-[#4e7085] rounded-lg px-2.5 py-1 text-xs text-white"
                               />
-
-                              <select
-                                value={ex.muscle}
-                                onChange={(e) => {
-                                  const updated = [...inlineEditingRoutine.exercises];
-                                  updated[exIdx].muscle = e.target.value;
-                                  setInlineEditingRoutine({
-                                    ...inlineEditingRoutine,
-                                    exercises: updated,
-                                  });
-                                }}
-                                className="w-24 bg-[#3d5a6c] border border-[#4e7085] rounded-lg px-2 py-1 text-xs text-white"
-                              >
-                                {muscleGroups.map((m) => (
-                                  <option key={m} value={m}>
-                                    {m}
-                                  </option>
-                                ))}
-                              </select>
 
                               <div className="flex items-center space-x-1 shrink-0">
                                 <button
@@ -806,11 +746,6 @@ Standing Calf Raise (Calves, 3 sets)`;
                         </div>
                       </div>
 
-                      <div className="mt-2.5 flex items-center space-x-2 text-xs text-[#8bb4cb] font-mono font-bold">
-                        <Calendar className="w-3.5 h-3.5" />
-                        <span>Cadence: repeat every {routine.target_rest_days || 3} days</span>
-                      </div>
-
                       {/* Exercises list */}
                       <div className="mt-4 space-y-1.5">
                         <div className="text-[10px] font-bold text-[#94a3b8] uppercase tracking-wider">
@@ -829,9 +764,6 @@ Standing Calf Raise (Calves, 3 sets)`;
                                   <div className="flex items-center space-x-2">
                                     <Dumbbell className="w-3.5 h-3.5 text-[#8bb4cb]" />
                                     <span className="font-bold">{exName}</span>
-                                    <span className="text-[10px] bg-[#3d5a6c] px-2 py-0.5 rounded text-[#cbd5e1] border border-[#4e7085]">
-                                      {re.exercise?.target_muscle_group || 'General'}
-                                    </span>
                                     {uni.isUnilateral && (
                                       <span
                                         className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${
@@ -874,7 +806,7 @@ Standing Calf Raise (Calves, 3 sets)`;
                                     <button
                                       onClick={() => removeExerciseFromRoutine(routine.id, idx)}
                                       className="text-[#94a3b8] hover:text-[#cc8d8d] p-1"
-                                      title="Remove from routine"
+                                      title="Remove from group"
                                     >
                                       <Trash2 className="w-3 h-3" />
                                     </button>
@@ -905,7 +837,7 @@ Standing Calf Raise (Calves, 3 sets)`;
             <div>
               <h3 className="text-base font-extrabold text-white">All Configured Exercises</h3>
               <p className="text-xs text-[#cbd5e1]">
-                Spreadsheet overview — reassign exercises to different routines or change target sets.
+                Spreadsheet overview of your movements and their navigation groups.
               </p>
             </div>
           </div>
@@ -915,8 +847,7 @@ Standing Calf Raise (Calves, 3 sets)`;
               <thead>
                 <tr className="border-b border-[#4e7085] text-[#94a3b8] uppercase text-[10px] font-extrabold tracking-wider">
                   <th className="py-2.5 px-3">Exercise Name</th>
-                  <th className="py-2.5 px-3">Target Muscle</th>
-                  <th className="py-2.5 px-3">Assigned Routine Split</th>
+                  <th className="py-2.5 px-3">Navigation Group</th>
                   <th className="py-2.5 px-3 text-center">Target Sets</th>
                   <th className="py-2.5 px-3 text-center">Tracking Mode</th>
                   <th className="py-2.5 px-3 text-right">Actions</th>
@@ -929,12 +860,6 @@ Standing Calf Raise (Calves, 3 sets)`;
                       <td className="py-2.5 px-3 font-bold text-white flex items-center space-x-2">
                         <Dumbbell className="w-3.5 h-3.5 text-[#8bb4cb]" />
                         <span>{re.exercise?.name || 'Exercise'}</span>
-                      </td>
-
-                      <td className="py-2.5 px-3">
-                        <span className="bg-[#2d4554] border border-[#3f5d70] px-2 py-0.5 rounded text-[11px] text-[#cbd5e1] font-medium">
-                          {re.exercise?.target_muscle_group || 'General'}
-                        </span>
                       </td>
 
                       <td className="py-2.5 px-3">

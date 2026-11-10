@@ -138,8 +138,8 @@ export const STARTER_ROUTINES: Omit<Routine, 'user_id' | 'id' | 'created_at'>[] 
     ]
   },
   {
-    name: 'Legs & Core',
-    description: 'Lower body foundation and core stability',
+    name: 'Legs',
+    description: 'Lower body movements',
     target_rest_days: 3,
     order_index: 2,
     exercises: [
@@ -153,7 +153,7 @@ export const STARTER_ROUTINES: Omit<Routine, 'user_id' | 'id' | 'created_at'>[] 
           id: 'ex-squat',
           user_id: 'sample',
           name: 'Barbell Squat',
-          target_muscle_group: 'Quads / Glutes',
+          target_muscle_group: 'Legs',
           default_unit: 'kg',
           created_at: new Date().toISOString(),
         }
@@ -168,7 +168,7 @@ export const STARTER_ROUTINES: Omit<Routine, 'user_id' | 'id' | 'created_at'>[] 
           id: 'ex-romanian-deadlift',
           user_id: 'sample',
           name: 'Romanian Deadlift (RDL)',
-          target_muscle_group: 'Hamstrings',
+          target_muscle_group: 'Legs',
           default_unit: 'kg',
           created_at: new Date().toISOString(),
         }
@@ -183,7 +183,7 @@ export const STARTER_ROUTINES: Omit<Routine, 'user_id' | 'id' | 'created_at'>[] 
           id: 'ex-leg-press',
           user_id: 'sample',
           name: 'Leg Press / Bulgarian Split Squat',
-          target_muscle_group: 'Quads',
+          target_muscle_group: 'Legs',
           default_unit: 'kg',
           created_at: new Date().toISOString(),
         }
@@ -198,7 +198,60 @@ export const STARTER_ROUTINES: Omit<Routine, 'user_id' | 'id' | 'created_at'>[] 
           id: 'ex-standing-calf-raise',
           user_id: 'sample',
           name: 'Standing Calf Raise',
-          target_muscle_group: 'Calves',
+          target_muscle_group: 'Legs',
+          default_unit: 'kg',
+          created_at: new Date().toISOString(),
+        }
+      }
+    ]
+  },
+  {
+    name: 'Core',
+    description: 'Core stability and abdominal movements',
+    target_rest_days: 3,
+    order_index: 3,
+    exercises: [
+      {
+        id: 'ex-hanging-leg-raise',
+        routine_id: 'sample-core',
+        exercise_id: 'ex-hanging-leg-raise',
+        target_sets: 3,
+        order_index: 0,
+        exercise: {
+          id: 'ex-hanging-leg-raise',
+          user_id: 'sample',
+          name: 'Hanging Leg Raise',
+          target_muscle_group: 'Core',
+          default_unit: 'kg',
+          created_at: new Date().toISOString(),
+        }
+      },
+      {
+        id: 'ex-cable-crunch',
+        routine_id: 'sample-core',
+        exercise_id: 'ex-cable-crunch',
+        target_sets: 3,
+        order_index: 1,
+        exercise: {
+          id: 'ex-cable-crunch',
+          user_id: 'sample',
+          name: 'Ab Crunch / Cable Crunch',
+          target_muscle_group: 'Core',
+          default_unit: 'kg',
+          created_at: new Date().toISOString(),
+        }
+      },
+      {
+        id: 'ex-plank',
+        routine_id: 'sample-core',
+        exercise_id: 'ex-plank',
+        target_sets: 3,
+        order_index: 2,
+        exercise: {
+          id: 'ex-plank',
+          user_id: 'sample',
+          name: 'Plank / Ab Wheel Rollout',
+          target_muscle_group: 'Core',
           default_unit: 'kg',
           created_at: new Date().toISOString(),
         }

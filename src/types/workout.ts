@@ -106,6 +106,8 @@ export interface LogExercisePayload {
 }
 
 export const MUSCLE_GROUPS = [
+  'Legs',
+  'Core',
   'Chest',
   'Back',
   'Shoulders',

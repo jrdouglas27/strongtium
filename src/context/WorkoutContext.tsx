@@ -394,6 +394,84 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
 
 
+      // Auto-split "Legs & Core" into separate "Legs" and "Core" groups if present
+      const legsAndCoreRoutine = formattedRoutines.find((r) =>
+        /^legs\s*(&|and)\s*core$/i.test(r.name.trim())
+      );
+
+      if (legsAndCoreRoutine && user) {
+        const coreRegex =
+          /core|ab|plank|crunch|sit[\s-]?up|hollow|twist|woodchop|rollout|dead\s*bug|bird\s*dog|l-sit|leg\s*raise/i;
+        const legExIds: { exercise_id: string; target_sets: number }[] = [];
+        const coreExIds: { exercise_id: string; target_sets: number }[] = [];
+
+        for (const re of legsAndCoreRoutine.exercises || []) {
+          const exName = re.exercise?.name || '';
+          const exMuscle = re.exercise?.target_muscle_group || '';
+          if (coreRegex.test(`${exName} ${exMuscle}`)) {
+            coreExIds.push({ exercise_id: re.exercise_id, target_sets: re.target_sets || 3 });
+          } else {
+            legExIds.push({ exercise_id: re.exercise_id, target_sets: re.target_sets || 3 });
+          }
+        }
+
+        await supabase
+          .from('routines')
+          .update({
+            name: 'Legs',
+            description: 'Lower body movements',
+          })
+          .eq('id', legsAndCoreRoutine.id);
+
+        if (coreExIds.length > 0) {
+          await supabase.from('routine_exercises').delete().eq('routine_id', legsAndCoreRoutine.id);
+          for (let i = 0; i < legExIds.length; i++) {
+            await supabase.from('routine_exercises').insert({
+              routine_id: legsAndCoreRoutine.id,
+              exercise_id: legExIds[i].exercise_id,
+              target_sets: legExIds[i].target_sets,
+              order_index: i,
+            });
+          }
+        }
+
+        const existingCoreRoutine = formattedRoutines.find(
+          (r) => r.id !== legsAndCoreRoutine.id && /^core(\s+group)?$/i.test(r.name.trim())
+        );
+
+        let coreRoutineId = existingCoreRoutine?.id || '';
+        if (!coreRoutineId) {
+          const { data: newCoreRoutine } = await supabase
+            .from('routines')
+            .insert({
+              user_id: user.id,
+              name: 'Core',
+              description: 'Core stability and abdominal movements',
+              target_rest_days: 3,
+              order_index: formattedRoutines.length,
+            })
+            .select()
+            .single();
+
+          if (newCoreRoutine) {
+            coreRoutineId = newCoreRoutine.id;
+          }
+        }
+
+        if (coreRoutineId && coreExIds.length > 0) {
+          for (let i = 0; i < coreExIds.length; i++) {
+            await supabase.from('routine_exercises').insert({
+              routine_id: coreRoutineId,
+              exercise_id: coreExIds[i].exercise_id,
+              target_sets: coreExIds[i].target_sets,
+              order_index: i,
+            });
+          }
+        }
+
+        needsRefetch = true;
+      }
+
       if (needsRefetch) {
         return fetchData();
       }
@@ -677,7 +755,7 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
           .insert({
             user_id: user.id,
             routine_id: payload.routineId || null,
-            routine_name: payload.routineName || 'Logged Workout',
+            routine_name: payload.routineName || 'Workout Session',
             started_at: timestamp,
             completed_at: timestamp,
           })
@@ -686,6 +764,22 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
         if (sErr) throw sErr;
         sessionId = newSession.id;
+      } else if (existingSessions && existingSessions[0]) {
+        const currentSession = existingSessions[0];
+        if (
+          payload.routineName &&
+          currentSession.routine_name &&
+          currentSession.routine_name !== 'Workout Session' &&
+          currentSession.routine_name.trim().toLowerCase() !== payload.routineName.trim().toLowerCase()
+        ) {
+          await supabase
+            .from('workout_sessions')
+            .update({
+              routine_id: null,
+              routine_name: 'Workout Session',
+            })
+            .eq('id', sessionId);
+        }
       }
 
       // 3. Delete any existing entry for this exercise across sessions on this date to prevent duplicate rows

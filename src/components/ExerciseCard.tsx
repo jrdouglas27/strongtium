@@ -70,7 +70,7 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
 
   // Determine base exercise name and limb type ('Arm' vs 'Leg')
   const baseName = getBaseExerciseName(exerciseName);
-  const limbType = getLimbTypeForMuscle(targetMuscleGroup);
+  const limbType = getLimbTypeForMuscle(targetMuscleGroup, baseName);
   const leftExerciseName = `${baseName} (Left ${limbType})`;
   const rightExerciseName = `${baseName} (Right ${limbType})`;
 
@@ -594,14 +594,6 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-1.5">
-            {routineName && (
-              <span className="bg-[#8bb4cb] text-[#0e2938] text-[10px] font-extrabold px-2 py-0.5 rounded-md border border-[#749fb7] uppercase tracking-wider">
-                {routineName}
-              </span>
-            )}
-            <span className="bg-[#2d4554] text-[#cbd5e1] text-[10px] font-bold px-2 py-0.5 rounded-md border border-[#3f5d70]">
-              {targetMuscleGroup}
-            </span>
             {targetSets && (
               <span className="text-[10px] text-[#94a3b8] font-mono font-medium">
                 {targetSets} Target Sets
