@@ -55,6 +55,11 @@ interface WorkoutContextType {
   unilateralPreferences: Record<string, boolean>;
   setExerciseUnilateral: (exerciseName: string, isUnilateral: boolean) => Promise<void>;
   isExerciseUnilateral: (exerciseName: string, muscle?: string) => boolean;
+  bodyWeight: number;
+  setBodyWeight: (weight: number) => Promise<void>;
+  bodyweightPreferences: Record<string, boolean>;
+  setExerciseIncludesBodyWeight: (exerciseName: string, includesBodyWeight: boolean) => Promise<void>;
+  doesExerciseIncludeBodyWeight: (exerciseName: string) => boolean;
 }
 
 const WorkoutContext = createContext<WorkoutContextType | undefined>(undefined);
@@ -62,6 +67,8 @@ const WorkoutContext = createContext<WorkoutContextType | undefined>(undefined);
 const LOCAL_STORAGE_ROUTINES = 'strongtium_routines';
 const LOCAL_STORAGE_SESSIONS = 'strongtium_sessions';
 const LOCAL_STORAGE_UNILATERAL = 'strongtium_unilateral_preferences';
+const LOCAL_STORAGE_BODY_WEIGHT = 'strongtium_body_weight';
+const LOCAL_STORAGE_BODYWEIGHT_PREFS = 'strongtium_bodyweight_preferences';
 
 export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
@@ -72,6 +79,23 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [unilateralPreferences, setUnilateralPreferences] = useState<Record<string, boolean>>(() => {
     try {
       const raw = localStorage.getItem(LOCAL_STORAGE_UNILATERAL);
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) {
+      return {};
+    }
+  });
+  const [bodyWeight, setBodyWeightState] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem(LOCAL_STORAGE_BODY_WEIGHT);
+      const parsed = raw ? parseFloat(raw) : 0;
+      return isNaN(parsed) || parsed < 0 ? 0 : parsed;
+    } catch (e) {
+      return 0;
+    }
+  });
+  const [bodyweightPreferences, setBodyweightPreferences] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem(LOCAL_STORAGE_BODYWEIGHT_PREFS);
       return raw ? JSON.parse(raw) : {};
     } catch (e) {
       return {};
@@ -99,6 +123,54 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const userSpecific = localStorage.getItem(`${LOCAL_STORAGE_UNILATERAL}_${user.id}`);
         if (userSpecific) {
           setUnilateralPreferences(JSON.parse(userSpecific));
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    if (typeof user?.user_metadata?.body_weight === 'number' && user.user_metadata.body_weight >= 0) {
+      const remoteBW = user.user_metadata.body_weight;
+      setBodyWeightState(remoteBW);
+      try {
+        localStorage.setItem(LOCAL_STORAGE_BODY_WEIGHT, String(remoteBW));
+        if (user.id) {
+          localStorage.setItem(`${LOCAL_STORAGE_BODY_WEIGHT}_${user.id}`, String(remoteBW));
+        }
+      } catch (e) {
+        // ignore
+      }
+    } else if (user?.id) {
+      try {
+        const userSpecificBW = localStorage.getItem(`${LOCAL_STORAGE_BODY_WEIGHT}_${user.id}`);
+        if (userSpecificBW) {
+          const parsed = parseFloat(userSpecificBW);
+          if (!isNaN(parsed) && parsed >= 0) setBodyWeightState(parsed);
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    if (user?.user_metadata?.bodyweight_preferences) {
+      const remoteBWPrefs = user.user_metadata.bodyweight_preferences;
+      setBodyweightPreferences((prev) => {
+        const merged = { ...prev, ...remoteBWPrefs };
+        try {
+          localStorage.setItem(LOCAL_STORAGE_BODYWEIGHT_PREFS, JSON.stringify(merged));
+          if (user.id) {
+            localStorage.setItem(`${LOCAL_STORAGE_BODYWEIGHT_PREFS}_${user.id}`, JSON.stringify(merged));
+          }
+        } catch (e) {
+          // ignore
+        }
+        return merged;
+      });
+    } else if (user?.id) {
+      try {
+        const userSpecificBWPrefs = localStorage.getItem(`${LOCAL_STORAGE_BODYWEIGHT_PREFS}_${user.id}`);
+        if (userSpecificBWPrefs) {
+          setBodyweightPreferences(JSON.parse(userSpecificBWPrefs));
         }
       } catch (e) {
         // ignore
@@ -149,6 +221,81 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return isUnilateralMovement(exerciseName, muscle, unilateralPreferences);
     },
     [unilateralPreferences]
+  );
+
+  const setBodyWeight = useCallback(
+    async (weight: number) => {
+      const sanitized = isNaN(weight) || weight < 0 ? 0 : Number(weight.toFixed(2));
+      setBodyWeightState(sanitized);
+      try {
+        localStorage.setItem(LOCAL_STORAGE_BODY_WEIGHT, String(sanitized));
+        if (user?.id) {
+          localStorage.setItem(`${LOCAL_STORAGE_BODY_WEIGHT}_${user.id}`, String(sanitized));
+        }
+      } catch (e) {
+        console.error('Failed to save body weight', e);
+      }
+
+      if (user) {
+        try {
+          await supabase.auth.updateUser({
+            data: {
+              body_weight: sanitized,
+            },
+          });
+        } catch (err) {
+          console.warn('Could not sync body weight to Supabase user metadata:', err);
+        }
+      }
+    },
+    [user]
+  );
+
+  const setExerciseIncludesBodyWeight = useCallback(
+    async (exerciseName: string, includesBodyWeight: boolean) => {
+      const cleanName = getBaseExerciseName(exerciseName).trim().toLowerCase();
+      if (!cleanName) return;
+
+      setBodyweightPreferences((prev) => {
+        const updated = { ...prev, [cleanName]: includesBodyWeight };
+        try {
+          localStorage.setItem(LOCAL_STORAGE_BODYWEIGHT_PREFS, JSON.stringify(updated));
+          if (user?.id) {
+            localStorage.setItem(`${LOCAL_STORAGE_BODYWEIGHT_PREFS}_${user.id}`, JSON.stringify(updated));
+          }
+        } catch (e) {
+          console.error('Failed to save bodyweight preference', e);
+        }
+        return updated;
+      });
+
+      if (user) {
+        try {
+          const currentMeta = user.user_metadata || {};
+          const currentPrefs = currentMeta.bodyweight_preferences || {};
+          await supabase.auth.updateUser({
+            data: {
+              bodyweight_preferences: {
+                ...currentPrefs,
+                [cleanName]: includesBodyWeight,
+              },
+            },
+          });
+        } catch (err) {
+          console.warn('Could not sync bodyweight preference to Supabase user metadata:', err);
+        }
+      }
+    },
+    [user]
+  );
+
+  const doesExerciseIncludeBodyWeight = useCallback(
+    (exerciseName: string) => {
+      const cleanName = getBaseExerciseName(exerciseName).trim().toLowerCase();
+      if (!cleanName) return false;
+      return Boolean(bodyweightPreferences[cleanName]);
+    },
+    [bodyweightPreferences]
   );
 
   // Compute Personal Records from sessions
@@ -1184,6 +1331,11 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
         unilateralPreferences,
         setExerciseUnilateral,
         isExerciseUnilateral,
+        bodyWeight,
+        setBodyWeight,
+        bodyweightPreferences,
+        setExerciseIncludesBodyWeight,
+        doesExerciseIncludeBodyWeight,
       }}
     >
       {children}

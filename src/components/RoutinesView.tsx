@@ -12,6 +12,7 @@ import {
   Save,
   HelpCircle,
   FolderSync,
+  Scale,
 } from 'lucide-react';
 import { useWorkout } from '../context/WorkoutContext';
 import { RoutineEditorModal } from './RoutineEditorModal';
@@ -28,16 +29,37 @@ export const RoutinesView: React.FC = () => {
     loadStarterRoutines,
     isExerciseUnilateral,
     setExerciseUnilateral,
+    bodyWeight,
+    setBodyWeight,
+    doesExerciseIncludeBodyWeight,
+    setExerciseIncludesBodyWeight,
   } = useWorkout();
 
   const [activeViewMode, setActiveViewMode] = useState<'splits' | 'matrix' | 'text'>('splits');
   const [showEditor, setShowEditor] = useState(false);
+
+  // Body Weight Input State
+  const [bwInput, setBwInput] = useState<string>(bodyWeight > 0 ? String(bodyWeight) : '');
+  const [bwSavedFeedback, setBwSavedFeedback] = useState(false);
+
+  React.useEffect(() => {
+    setBwInput(bodyWeight > 0 ? String(bodyWeight) : '');
+  }, [bodyWeight]);
+
+  const handleSaveBodyWeight = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const parsed = parseFloat(bwInput);
+    await setBodyWeight(isNaN(parsed) || parsed < 0 ? 0 : parsed);
+    setBwSavedFeedback(true);
+    setTimeout(() => setBwSavedFeedback(false), 2000);
+  };
 
   // Quick Add Exercise State
   const [quickExName, setQuickExName] = useState('');
   const [quickExRoutineId, setQuickExRoutineId] = useState(routines[0]?.id || '');
   const [quickExSets, setQuickExSets] = useState<number | ''>(3);
   const [quickExUnilateral, setQuickExUnilateral] = useState(false);
+  const [quickExIncludesBW, setQuickExIncludesBW] = useState(false);
   const quickExUserToggledRef = React.useRef(false);
   const [quickAddedFeedback, setQuickAddedFeedback] = useState(false);
 
@@ -66,10 +88,10 @@ Dumbbell Bicep Curls (3 sets, L/R)
 Face Pulls (3 sets)
 
 # Legs
-Barbell Squat (3 sets)
+Barbell Squat (3 sets, +BW)
 Romanian Deadlift (3 sets)
-Bulgarian Split Squat (3 sets, L/R)
-Standing Calf Raise (3 sets)
+Bulgarian Split Squat (3 sets, L/R, +BW)
+Standing Calf Raise (3 sets, +BW)
 
 # Core
 Hanging Leg Raise (3 sets)
@@ -86,7 +108,7 @@ Plank / Ab Wheel Rollout (3 sets)`;
     name: string;
     description: string;
     targetRestDays: number;
-    exercises: { name: string; muscle: string; targetSets: number | ''; isUnilateral?: boolean }[];
+    exercises: { name: string; muscle: string; targetSets: number | ''; isUnilateral?: boolean; includesBW?: boolean }[];
   } | null>(null);
 
   // Handle Quick Add Exercise
@@ -102,10 +124,12 @@ Plank / Ab Wheel Rollout (3 sets)`;
       setsToSave
     );
     await setExerciseUnilateral(quickExName.trim(), quickExUnilateral);
+    await setExerciseIncludesBodyWeight(quickExName.trim(), quickExIncludesBW);
 
     setQuickExName('');
     quickExUserToggledRef.current = false;
     setQuickExUnilateral(false);
+    setQuickExIncludesBW(false);
     setQuickAddedFeedback(true);
     setTimeout(() => setQuickAddedFeedback(false), 2000);
   };
@@ -128,6 +152,7 @@ Plank / Ab Wheel Rollout (3 sets)`;
           muscle: exMuscle,
           targetSets: re.target_sets || 3,
           isUnilateral: isExerciseUnilateral(exName, exMuscle),
+          includesBW: doesExerciseIncludeBodyWeight(exName),
         };
       }),
     });
@@ -145,6 +170,7 @@ Plank / Ab Wheel Rollout (3 sets)`;
       if (ex.name.trim()) {
         const uni = ex.isUnilateral !== undefined ? ex.isUnilateral : isExerciseUnilateral(ex.name.trim(), ex.muscle);
         await setExerciseUnilateral(ex.name.trim(), uni);
+        await setExerciseIncludesBodyWeight(ex.name.trim(), Boolean(ex.includesBW));
       }
     }
     await updateRoutine(
@@ -164,7 +190,7 @@ Plank / Ab Wheel Rollout (3 sets)`;
       ...inlineEditingRoutine,
       exercises: [
         ...inlineEditingRoutine.exercises,
-        { name: '', muscle: 'General', targetSets: 3, isUnilateral: false },
+        { name: '', muscle: 'General', targetSets: 3, isUnilateral: false, includesBW: false },
       ],
     });
   };
@@ -205,25 +231,28 @@ Plank / Ab Wheel Rollout (3 sets)`;
           currentRoutineName = line.replace(/^#+\s*/, '').trim();
           currentRoutineExercises = [];
         } else {
-          // Exercise item line, e.g. "Barbell Bench Press (Chest, 3 sets)" or "Dumbbell Curl (Biceps, 3 sets, L/R)"
+          // Exercise item line, e.g. "Barbell Bench Press (3 sets)" or "Standing Calf Raise (3 sets, +BW)"
           let exName = line;
           let muscle = 'General';
           let sets = 3;
           let isUni: boolean | undefined = undefined;
+          let includesBW: boolean | undefined = undefined;
 
           const parenMatch = line.match(/^(.*?)\((.*?)\)$/);
           if (parenMatch) {
             exName = parenMatch[1].trim();
             const details = parenMatch[2].split(',').map((s) => s.trim());
-            if (details[0]) muscle = details[0].trim();
-            for (let i = 1; i < details.length; i++) {
+            for (let i = 0; i < details.length; i++) {
               const part = details[i];
               const numMatch = part.match(/\d+/);
-              if (numMatch && !/l\/r|l & r/i.test(part)) {
+              if (numMatch && !/l\/r|l & r|\+?bw|bodyweight|body weight/i.test(part)) {
                 sets = parseInt(numMatch[0], 10);
-              }
-              if (/l\/r|l & r|left\/right|unilateral/i.test(part)) {
+              } else if (/l\/r|l & r|left\/right|unilateral/i.test(part)) {
                 isUni = true;
+              } else if (/\+?bw|bodyweight|body weight/i.test(part)) {
+                includesBW = true;
+              } else if (i === 0 && part) {
+                muscle = part.trim();
               }
             }
           }
@@ -234,6 +263,7 @@ Plank / Ab Wheel Rollout (3 sets)`;
               muscle: muscle || 'General',
               targetSets: sets || 3,
               ...(isUni !== undefined ? { isUnilateral: isUni } : {}),
+              ...(includesBW !== undefined ? { includesBW } : {}),
             } as any);
           }
         }
@@ -258,6 +288,9 @@ Plank / Ab Wheel Rollout (3 sets)`;
         for (const ex of r.exercises as any[]) {
           if (ex.isUnilateral !== undefined) {
             await setExerciseUnilateral(ex.name, ex.isUnilateral);
+          }
+          if (ex.includesBW !== undefined) {
+            await setExerciseIncludesBodyWeight(ex.name, ex.includesBW);
           }
         }
       }
@@ -327,6 +360,53 @@ Plank / Ab Wheel Rollout (3 sets)`;
         </div>
       </div>
 
+      {/* Body Weight Setting Card */}
+      <form
+        onSubmit={handleSaveBodyWeight}
+        className="bg-[#3d5a6c] border border-[#4e7085] rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+      >
+        <div className="flex items-start sm:items-center space-x-3">
+          <div className="p-2.5 bg-[#2d4554] border border-[#3f5d70] rounded-xl text-[#8fb89e] shrink-0">
+            <Scale className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-sm font-extrabold text-white">Your Body Weight</h3>
+            <p className="text-xs text-[#cbd5e1] font-medium">
+              Added to your additional weight for movements marked <strong className="text-[#8fb89e]">+BW</strong> (e.g. Calf Raise, Squat) to compute total rep weight.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-2 shrink-0 self-start sm:self-auto">
+          <div className="relative flex items-center">
+            <input
+              type="number"
+              step="0.5"
+              min={0}
+              max={400}
+              placeholder="e.g. 75"
+              value={bwInput}
+              onChange={(e) => setBwInput(e.target.value)}
+              className="w-28 bg-[#2d4554] border border-[#3f5d70] rounded-xl pl-3 pr-8 py-2 text-xs text-white font-mono font-bold focus:outline-none focus:border-[#8bb4cb]"
+            />
+            <span className="text-[11px] text-[#94a3b8] font-mono font-bold absolute right-2.5 pointer-events-none">
+              kg
+            </span>
+          </div>
+          <button
+            type="submit"
+            className={`px-4 py-2 rounded-xl text-xs font-extrabold transition shadow-sm border flex items-center space-x-1.5 ${
+              bwSavedFeedback
+                ? 'bg-[#8fb89e] text-[#0e2a18] border-[#78a387]'
+                : 'bg-[#8bb4cb] hover:bg-[#749fb7] text-[#0e2938] border-[#749fb7]'
+            }`}
+          >
+            {bwSavedFeedback ? <Check className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
+            <span>{bwSavedFeedback ? 'Saved!' : 'Save BW'}</span>
+          </button>
+        </div>
+      </form>
+
       {/* Quick Add Exercise Bar */}
       <div className="bg-[#3d5a6c] border border-[#4e7085] rounded-2xl p-4 sm:p-5 shadow-sm space-y-3">
         <div className="flex items-center justify-between">
@@ -346,7 +426,7 @@ Plank / Ab Wheel Rollout (3 sets)`;
         </div>
 
         <form onSubmit={handleQuickAdd} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
-          <div className="sm:col-span-5">
+          <div className="sm:col-span-4">
             <input
               type="text"
               required
@@ -357,7 +437,7 @@ Plank / Ab Wheel Rollout (3 sets)`;
             />
           </div>
 
-          <div className="sm:col-span-3">
+          <div className="sm:col-span-2">
             <select
               value={quickExRoutineId}
               onChange={(e) => setQuickExRoutineId(e.target.value)}
@@ -391,6 +471,26 @@ Plank / Ab Wheel Rollout (3 sets)`;
             >
               <Sparkles className="w-3 h-3 text-[#8bb4cb]" />
               <span>{quickExUnilateral ? '⚡ L/R Split' : 'Bilateral'}</span>
+            </button>
+          </div>
+
+          <div className="sm:col-span-2">
+            <button
+              type="button"
+              onClick={() => setQuickExIncludesBW(!quickExIncludesBW)}
+              className={`w-full py-2 px-2 rounded-xl text-[11px] font-extrabold border flex items-center justify-center space-x-1 transition ${
+                quickExIncludesBW
+                  ? 'bg-[#274a38] text-[#8fb89e] border-[#3c6e54]'
+                  : 'bg-[#2d4554] text-[#94a3b8] hover:text-white border-[#3f5d70]'
+              }`}
+              title={
+                quickExIncludesBW
+                  ? 'Includes your body weight + additional weight for total rep weight.'
+                  : 'Uses additional weight only. Click to include body weight (+BW).'
+              }
+            >
+              <Scale className="w-3 h-3" />
+              <span>{quickExIncludesBW ? '+BW Active' : 'Add\'l Only'}</span>
             </button>
           </div>
 
@@ -665,6 +765,32 @@ Plank / Ab Wheel Rollout (3 sets)`;
                               <button
                                 type="button"
                                 onClick={() => {
+                                  const curBW = ex.includesBW !== undefined ? ex.includesBW : doesExerciseIncludeBodyWeight(ex.name);
+                                  const updated = [...inlineEditingRoutine.exercises];
+                                  updated[exIdx].includesBW = !curBW;
+                                  setInlineEditingRoutine({
+                                    ...inlineEditingRoutine,
+                                    exercises: updated,
+                                  });
+                                }}
+                                className={`px-1.5 py-1 rounded text-[10px] font-extrabold border shrink-0 transition flex items-center space-x-1 ${
+                                  (ex.includesBW !== undefined ? ex.includesBW : doesExerciseIncludeBodyWeight(ex.name))
+                                    ? 'bg-[#274a38] text-[#8fb89e] border-[#3c6e54]'
+                                    : 'bg-[#3d5a6c] text-[#94a3b8] hover:text-white border-[#4e7085]'
+                                }`}
+                                title={
+                                  (ex.includesBW !== undefined ? ex.includesBW : doesExerciseIncludeBodyWeight(ex.name))
+                                    ? 'Includes body weight + additional weight. Click for additional weight only.'
+                                    : 'Additional weight only. Click to include body weight (+BW).'
+                                }
+                              >
+                                <Scale className="w-2.5 h-2.5" />
+                                <span>+BW</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
                                   const updated = inlineEditingRoutine.exercises.filter(
                                     (_, i) => i !== exIdx
                                   );
@@ -779,6 +905,28 @@ Plank / Ab Wheel Rollout (3 sets)`;
 
                                   <div className="flex items-center space-x-2">
                                     {(() => {
+                                      const includesBW = doesExerciseIncludeBodyWeight(exName);
+                                      return (
+                                        <button
+                                          type="button"
+                                          onClick={() => setExerciseIncludesBodyWeight(exName, !includesBW)}
+                                          className={`text-[9px] px-2 py-0.5 rounded-md font-extrabold flex items-center space-x-1 border transition ${
+                                            includesBW
+                                              ? 'bg-[#274a38] hover:bg-[#315d46] text-[#8fb89e] border-[#3c6e54]'
+                                              : 'bg-[#3d5a6c] hover:bg-[#4a6b80] text-[#94a3b8] hover:text-white border-[#4e7085]'
+                                          }`}
+                                          title={
+                                            includesBW
+                                              ? `Adds your body weight (${bodyWeight || 0}kg) + additional weight. Click to use additional weight only.`
+                                              : 'Uses additional weight only. Click to include body weight (+BW).'
+                                          }
+                                        >
+                                          <Scale className="w-2.5 h-2.5" />
+                                          <span>{includesBW ? '+BW' : 'Add\'l'}</span>
+                                        </button>
+                                      );
+                                    })()}
+                                    {(() => {
                                       const isUni = isExerciseUnilateral(exName, re.exercise?.target_muscle_group);
                                       return (
                                         <button
@@ -849,6 +997,7 @@ Plank / Ab Wheel Rollout (3 sets)`;
                   <th className="py-2.5 px-3">Exercise Name</th>
                   <th className="py-2.5 px-3">Navigation Group</th>
                   <th className="py-2.5 px-3 text-center">Target Sets</th>
+                  <th className="py-2.5 px-3 text-center">Body Weight</th>
                   <th className="py-2.5 px-3 text-center">Tracking Mode</th>
                   <th className="py-2.5 px-3 text-right">Actions</th>
                 </tr>
@@ -870,6 +1019,32 @@ Plank / Ab Wheel Rollout (3 sets)`;
 
                       <td className="py-2.5 px-3 text-center font-mono font-bold text-white">
                         {re.target_sets} sets
+                      </td>
+
+                      <td className="py-2.5 px-3 text-center">
+                        {(() => {
+                          const exName = re.exercise?.name || 'Exercise';
+                          const includesBW = doesExerciseIncludeBodyWeight(exName);
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => setExerciseIncludesBodyWeight(exName, !includesBW)}
+                              className={`text-[10px] px-2.5 py-1 rounded-md font-extrabold inline-flex items-center space-x-1 border transition ${
+                                includesBW
+                                  ? 'bg-[#274a38] hover:bg-[#315d46] text-[#8fb89e] border-[#3c6e54]'
+                                  : 'bg-[#2d4554] hover:bg-[#344e5e] text-[#94a3b8] hover:text-white border-[#3f5d70]'
+                              }`}
+                              title={
+                                includesBW
+                                  ? `Adds body weight (${bodyWeight || 0}kg) + additional weight. Click for additional weight only.`
+                                  : 'Additional weight only. Click to include body weight (+BW).'
+                              }
+                            >
+                              <Scale className="w-2.5 h-2.5" />
+                              <span>{includesBW ? '+BW Active' : 'Add\'l Only'}</span>
+                            </button>
+                          );
+                        })()}
                       </td>
 
                       <td className="py-2.5 px-3 text-center">
@@ -925,7 +1100,7 @@ Plank / Ab Wheel Rollout (3 sets)`;
               <span>Bulk Text & Routine Importer</span>
             </h3>
             <p className="text-xs text-[#cbd5e1]">
-              Write or paste your workout routine in simple Markdown list format. Use headers (<code># Routine Name</code>) followed by exercises. Add <code>, L/R</code> to enable Left &amp; Right side tracking (e.g. <code>Dumbbell Lateral Raise (Shoulders, 3 sets, L/R)</code>).
+              Write or paste your workout routine in simple Markdown list format. Use headers (<code># Group Name</code>) followed by exercises. Add <code>, L/R</code> for Left &amp; Right tracking and <code>, +BW</code> to include body weight (e.g. <code>Standing Calf Raise (3 sets, +BW)</code>).
             </p>
           </div>
 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Plus, Trash2, Dumbbell, Save, Sparkles } from 'lucide-react';
+import { X, Plus, Trash2, Dumbbell, Save, Sparkles, Scale } from 'lucide-react';
 import { useWorkout } from '../context/WorkoutContext';
 
 interface RoutineEditorModalProps {
@@ -7,11 +7,17 @@ interface RoutineEditorModalProps {
 }
 
 export const RoutineEditorModal: React.FC<RoutineEditorModalProps> = ({ onClose }) => {
-  const { createRoutine, setExerciseUnilateral, isExerciseUnilateral } = useWorkout();
+  const {
+    createRoutine,
+    setExerciseUnilateral,
+    isExerciseUnilateral,
+    setExerciseIncludesBodyWeight,
+    doesExerciseIncludeBodyWeight,
+  } = useWorkout();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [exercises, setExercises] = useState<
-    { name: string; targetSets: number | ''; isUnilateral?: boolean }[]
+    { name: string; targetSets: number | ''; isUnilateral?: boolean; includesBW?: boolean }[]
   >([
     { name: '', targetSets: 3 },
   ]);
@@ -27,7 +33,7 @@ export const RoutineEditorModal: React.FC<RoutineEditorModalProps> = ({ onClose 
 
   const handleUpdateExercise = (
     index: number,
-    field: 'name' | 'targetSets' | 'isUnilateral',
+    field: 'name' | 'targetSets' | 'isUnilateral' | 'includesBW',
     val: any
   ) => {
     const updated = [...exercises];
@@ -65,6 +71,8 @@ export const RoutineEditorModal: React.FC<RoutineEditorModalProps> = ({ onClose 
         if (ex.name.trim()) {
           const uni = ex.isUnilateral !== undefined ? ex.isUnilateral : isExerciseUnilateral(ex.name.trim(), name.trim());
           await setExerciseUnilateral(ex.name.trim(), uni);
+          const incBW = ex.includesBW !== undefined ? ex.includesBW : doesExerciseIncludeBodyWeight(ex.name.trim());
+          await setExerciseIncludesBodyWeight(ex.name.trim(), incBW);
         }
       }
       await createRoutine(name.trim(), description.trim(), 3, validExercises);
@@ -234,6 +242,27 @@ export const RoutineEditorModal: React.FC<RoutineEditorModalProps> = ({ onClose 
                         ? 'L/R'
                         : 'Bi'}
                     </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const curBW = ex.includesBW !== undefined ? ex.includesBW : doesExerciseIncludeBodyWeight(ex.name);
+                      handleUpdateExercise(idx, 'includesBW', !curBW);
+                    }}
+                    className={`px-2 py-1 rounded-lg text-[10px] font-extrabold border shrink-0 transition flex items-center space-x-1 ${
+                      (ex.includesBW !== undefined ? ex.includesBW : doesExerciseIncludeBodyWeight(ex.name))
+                        ? 'bg-[#274a38] text-[#8fb89e] border-[#3c6e54]'
+                        : 'bg-[#3d5a6c] text-[#94a3b8] hover:text-white border-[#3f5d70]'
+                    }`}
+                    title={
+                      (ex.includesBW !== undefined ? ex.includesBW : doesExerciseIncludeBodyWeight(ex.name))
+                        ? 'Includes body weight + additional weight. Click for additional weight only.'
+                        : 'Additional weight only. Click to include body weight (+BW).'
+                    }
+                  >
+                    <Scale className="w-2.5 h-2.5" />
+                    <span>+BW</span>
                   </button>
 
                   {exercises.length > 1 && (

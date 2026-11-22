@@ -12,6 +12,7 @@ import {
   Sparkles,
   Calendar,
   Copy,
+  Scale,
 } from 'lucide-react';
 import { useWorkout } from '../context/WorkoutContext';
 import {
@@ -66,6 +67,8 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
     sessions,
     setExerciseUnilateral,
     isExerciseUnilateral,
+    bodyWeight,
+    doesExerciseIncludeBodyWeight,
   } = useWorkout();
 
   // Determine base exercise name and limb type ('Arm' vs 'Leg')
@@ -73,6 +76,25 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
   const limbType = getLimbTypeForMuscle(targetMuscleGroup, baseName);
   const leftExerciseName = `${baseName} (Left ${limbType})`;
   const rightExerciseName = `${baseName} (Right ${limbType})`;
+
+  const includesBodyWeight = doesExerciseIncludeBodyWeight(baseName);
+  const activeBodyWeight = includesBodyWeight && bodyWeight > 0 ? bodyWeight : 0;
+
+  const toAdditionalWeight = useCallback(
+    (totalWeight: number) =>
+      activeBodyWeight > 0
+        ? Math.max(0, Number((totalWeight - activeBodyWeight).toFixed(2)))
+        : totalWeight,
+    [activeBodyWeight]
+  );
+
+  const toTotalWeight = useCallback(
+    (additionalWeight: number) =>
+      activeBodyWeight > 0
+        ? Number((additionalWeight + activeBodyWeight).toFixed(2))
+        : additionalWeight,
+    [activeBodyWeight]
+  );
 
   // Determine if this exercise defaults to Unilateral L/R tracking
   const configuredUnilateral = useMemo(
@@ -160,13 +182,13 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
 
     const perfKey = `${leftPerf?.last_performed_at || ''}_${(leftPerf?.sets || []).map((s) => `${s.weight}x${s.reps}`).join(',')}_${rightPerf?.last_performed_at || ''}_${(rightPerf?.sets || []).map((s) => `${s.weight}x${s.reps}`).join(',')}_${bilateralPerf?.last_performed_at || ''}_${(bilateralPerf?.sets || []).map((s) => `${s.weight}x${s.reps}`).join(',')}`;
 
-    return `${baseName}__${activeDate}__${lId}[${lSets}]__${rId}[${rSets}]__${bId}[${bSets}]__${n}__perf[${perfKey}]`;
-  }, [baseName, activeDate, leftLogged, rightLogged, baseLogged, leftPerf, rightPerf, bilateralPerf]);
+    return `${baseName}__${activeDate}__bw${activeBodyWeight}__${lId}[${lSets}]__${rId}[${rSets}]__${bId}[${bSets}]__${n}__perf[${perfKey}]`;
+  }, [baseName, activeDate, activeBodyWeight, leftLogged, rightLogged, baseLogged, leftPerf, rightPerf, bilateralPerf]);
 
   const lastLoadedKeyRef = useRef<string>(savedDataFingerprint);
   const isDirtyRef = useRef<boolean>(false);
 
-  // State: Unilateral Sets
+  // State: Unilateral Sets (stored as additional weight when +BW is enabled)
   const [uniSets, setUniSets] = useState<UnilateralSetState[]>(() => {
     const leftSets = leftLogged?.sets || [];
     const rightSets = rightLogged?.sets || [];
@@ -175,9 +197,9 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
     if (maxLen > 0) {
       return Array.from({ length: maxLen }, (_, i) => ({
         setNumber: i + 1,
-        leftWeight: Number(leftSets[i]?.weight) || 0,
+        leftWeight: toAdditionalWeight(Number(leftSets[i]?.weight) || 0),
         leftReps: Number(leftSets[i]?.reps) || 0,
-        rightWeight: Number(rightSets[i]?.weight) || 0,
+        rightWeight: toAdditionalWeight(Number(rightSets[i]?.weight) || 0),
         rightReps: Number(rightSets[i]?.reps) || 0,
         isCompleted: true,
       }));
@@ -186,9 +208,9 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
     if (baseLogged && baseLogged.sets.length > 0) {
       return baseLogged.sets.map((s) => ({
         setNumber: s.set_number,
-        leftWeight: Number(s.weight),
+        leftWeight: toAdditionalWeight(Number(s.weight)),
         leftReps: Number(s.reps),
-        rightWeight: Number(s.weight),
+        rightWeight: toAdditionalWeight(Number(s.weight)),
         rightReps: Number(s.reps),
         isCompleted: true,
       }));
@@ -201,21 +223,21 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
       const prevR = rightPerf?.sets[i] || rightPerf?.sets[rightPerf.sets.length - 1];
       return {
         setNumber: i + 1,
-        leftWeight: prevL ? prevL.weight : 0,
+        leftWeight: prevL ? toAdditionalWeight(prevL.weight) : 0,
         leftReps: prevL ? prevL.reps : 0,
-        rightWeight: prevR ? prevR.weight : (prevL ? prevL.weight : 0),
+        rightWeight: prevR ? toAdditionalWeight(prevR.weight) : (prevL ? toAdditionalWeight(prevL.weight) : 0),
         rightReps: prevR ? prevR.reps : (prevL ? prevL.reps : 0),
         isCompleted: false,
       };
     });
   });
 
-  // State: Bilateral Sets
+  // State: Bilateral Sets (stored as additional weight when +BW is enabled)
   const [biSets, setBiSets] = useState<BilateralSetState[]>(() => {
     if (baseLogged && baseLogged.sets.length > 0) {
       return baseLogged.sets.map((s) => ({
         setNumber: s.set_number,
-        weight: Number(s.weight),
+        weight: toAdditionalWeight(Number(s.weight)),
         reps: Number(s.reps),
         isCompleted: true,
       }));
@@ -226,7 +248,7 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
       const prevSet = bilateralPerf?.sets[i] || bilateralPerf?.sets[bilateralPerf.sets.length - 1];
       return {
         setNumber: i + 1,
-        weight: prevSet ? prevSet.weight : 0,
+        weight: prevSet ? toAdditionalWeight(prevSet.weight) : 0,
         reps: prevSet ? prevSet.reps : 0,
         isCompleted: false,
       };
@@ -262,9 +284,9 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
       setUniSets(
         Array.from({ length: maxLen }, (_, i) => ({
           setNumber: i + 1,
-          leftWeight: Number(leftSets[i]?.weight) || 0,
+          leftWeight: toAdditionalWeight(Number(leftSets[i]?.weight) || 0),
           leftReps: Number(leftSets[i]?.reps) || 0,
-          rightWeight: Number(rightSets[i]?.weight) || 0,
+          rightWeight: toAdditionalWeight(Number(rightSets[i]?.weight) || 0),
           rightReps: Number(rightSets[i]?.reps) || 0,
           isCompleted: true,
         }))
@@ -274,9 +296,9 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
       setUniSets(
         baseLogged.sets.map((s) => ({
           setNumber: s.set_number,
-          leftWeight: Number(s.weight),
+          leftWeight: toAdditionalWeight(Number(s.weight)),
           leftReps: Number(s.reps),
-          rightWeight: Number(s.weight),
+          rightWeight: toAdditionalWeight(Number(s.weight)),
           rightReps: Number(s.reps),
           isCompleted: true,
         }))
@@ -284,7 +306,7 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
       setBiSets(
         baseLogged.sets.map((s) => ({
           setNumber: s.set_number,
-          weight: Number(s.weight),
+          weight: toAdditionalWeight(Number(s.weight)),
           reps: Number(s.reps),
           isCompleted: true,
         }))
@@ -298,9 +320,9 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
           const prevR = rightPerf?.sets[i] || rightPerf?.sets[rightPerf.sets.length - 1];
           return {
             setNumber: i + 1,
-            leftWeight: prevL ? prevL.weight : 0,
+            leftWeight: prevL ? toAdditionalWeight(prevL.weight) : 0,
             leftReps: prevL ? prevL.reps : 0,
-            rightWeight: prevR ? prevR.weight : (prevL ? prevL.weight : 0),
+            rightWeight: prevR ? toAdditionalWeight(prevR.weight) : (prevL ? toAdditionalWeight(prevL.weight) : 0),
             rightReps: prevR ? prevR.reps : (prevL ? prevL.reps : 0),
             isCompleted: false,
           };
@@ -311,7 +333,7 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
           const prevSet = bilateralPerf?.sets[i] || bilateralPerf?.sets[bilateralPerf.sets.length - 1];
           return {
             setNumber: i + 1,
-            weight: prevSet ? prevSet.weight : 0,
+            weight: prevSet ? toAdditionalWeight(prevSet.weight) : 0,
             reps: prevSet ? prevSet.reps : 0,
             isCompleted: false,
           };
@@ -330,6 +352,7 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
     rightPerf,
     bilateralPerf,
     targetSets,
+    toAdditionalWeight,
   ]);
 
   // Unilateral Handlers
@@ -419,9 +442,9 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
       const pR = rightPerf?.sets[i] || rightPerf?.sets[rightPerf.sets.length - 1];
       return {
         setNumber: i + 1,
-        leftWeight: pL ? pL.weight : 0,
+        leftWeight: pL ? toAdditionalWeight(pL.weight) : 0,
         leftReps: pL ? pL.reps : 0,
-        rightWeight: pR ? pR.weight : (pL ? pL.weight : 0),
+        rightWeight: pR ? toAdditionalWeight(pR.weight) : (pL ? toAdditionalWeight(pL.weight) : 0),
         rightReps: pR ? pR.reps : (pL ? pL.reps : 0),
         isCompleted: false,
       };
@@ -480,7 +503,7 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
     setBiSets(
       bilateralPerf.sets.map((ps, idx) => ({
         setNumber: idx + 1,
-        weight: ps.weight,
+        weight: toAdditionalWeight(ps.weight),
         reps: ps.reps,
         isCompleted: false,
       }))
@@ -503,11 +526,15 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
 
       if (isUnilateral) {
         const validSets = uniSets.filter(
-          (s) => s.leftWeight > 0 || s.leftReps > 0 || s.rightWeight > 0 || s.rightReps > 0
+          (s) =>
+            s.leftWeight > 0 ||
+            s.leftReps > 0 ||
+            s.rightWeight > 0 ||
+            s.rightReps > 0
         );
         if (validSets.length === 0) return;
 
-        // 1. Log Left Arm/Leg Sets
+        // 1. Log Left Arm/Leg Sets (total weight = bodyWeight + additionalWeight if +BW enabled)
         await logExerciseSets({
           exerciseName: leftExerciseName,
           targetMuscleGroup,
@@ -517,7 +544,7 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
           loggedAt,
           sets: validSets.map((s, i) => ({
             setNumber: i + 1,
-            weight: Number(s.leftWeight) || 0,
+            weight: toTotalWeight(Number(s.leftWeight) || 0),
             reps: Number(s.leftReps) || 0,
           })),
         });
@@ -532,7 +559,7 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
           loggedAt,
           sets: validSets.map((s, i) => ({
             setNumber: i + 1,
-            weight: Number(s.rightWeight) || 0,
+            weight: toTotalWeight(Number(s.rightWeight) || 0),
             reps: Number(s.rightReps) || 0,
           })),
         });
@@ -552,7 +579,7 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
           loggedAt,
           sets: validSets.map((s, i) => ({
             setNumber: i + 1,
-            weight: Number(s.weight) || 0,
+            weight: toTotalWeight(Number(s.weight) || 0),
             reps: Number(s.reps) || 0,
           })),
         });
@@ -622,6 +649,24 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
               <Sparkles className="w-2.5 h-2.5 text-[#8bb4cb]" />
               <span>{isUnilateral ? `⚡ L & R (${limbType}s)` : 'Bilateral'}</span>
             </button>
+
+            {includesBodyWeight && (
+              <span
+                className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border flex items-center space-x-1 uppercase tracking-wider ${
+                  activeBodyWeight > 0
+                    ? 'bg-[#274a38] text-[#8fb89e] border-[#3c6e54]'
+                    : 'bg-[#3b2d18] text-[#fcd34d] border-[#78350f]'
+                }`}
+                title={
+                  activeBodyWeight > 0
+                    ? `Adds your body weight (${activeBodyWeight}kg) to additional weight for total rep weight`
+                    : 'Body weight not set yet — set your body weight in Configuration'
+                }
+              >
+                <Scale className="w-2.5 h-2.5" />
+                <span>{activeBodyWeight > 0 ? `+BW (${activeBodyWeight}kg)` : '+BW (Set BW)'}</span>
+              </span>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -1038,7 +1083,9 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
                             }
                             className="w-full bg-transparent text-center text-white font-mono font-bold text-xs sm:text-sm focus:outline-none"
                           />
-                          <span className="text-[9px] text-[#94a3b8] block -mt-1 font-sans">kg</span>
+                          <span className="text-[9px] text-[#94a3b8] block -mt-1 font-sans">
+                            {activeBodyWeight > 0 ? `add'l • ${toTotalWeight(s.leftWeight)}kg` : 'kg'}
+                          </span>
                         </div>
                         <button
                           type="button"
@@ -1121,7 +1168,9 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
                             }
                             className="w-full bg-transparent text-center text-white font-mono font-bold text-xs sm:text-sm focus:outline-none"
                           />
-                          <span className="text-[9px] text-[#94a3b8] block -mt-1 font-sans">kg</span>
+                          <span className="text-[9px] text-[#94a3b8] block -mt-1 font-sans">
+                            {activeBodyWeight > 0 ? `add'l • ${toTotalWeight(s.rightWeight)}kg` : 'kg'}
+                          </span>
                         </div>
                         <button
                           type="button"
@@ -1212,7 +1261,9 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
                       }
                       className="w-full bg-transparent text-center text-white font-mono font-bold text-xs sm:text-sm focus:outline-none"
                     />
-                    <span className="text-[9px] text-[#94a3b8] block -mt-1 font-sans">kg</span>
+                    <span className="text-[9px] text-[#94a3b8] block -mt-1 font-sans">
+                      {activeBodyWeight > 0 ? `add'l • ${toTotalWeight(s.weight)}kg` : 'kg'}
+                    </span>
                   </div>
                   <button
                     type="button"

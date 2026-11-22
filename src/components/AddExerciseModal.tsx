@@ -14,13 +14,21 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
   defaultRoutineId,
   selectedDate,
 }) => {
-  const { routines, logExerciseSets, setExerciseUnilateral, isExerciseUnilateral } = useWorkout();
+  const {
+    routines,
+    logExerciseSets,
+    setExerciseUnilateral,
+    isExerciseUnilateral,
+    bodyWeight,
+    setExerciseIncludesBodyWeight,
+  } = useWorkout();
   const [name, setName] = useState('');
   const [routineId, setRoutineId] = useState(defaultRoutineId || '');
   const [targetSets, setTargetSets] = useState<number | ''>(3);
   const [initialWeight, setInitialWeight] = useState<number | ''>('');
   const [initialReps, setInitialReps] = useState<number | ''>('');
   const [splitSides, setSplitSides] = useState(false);
+  const [includesBW, setIncludesBW] = useState(false);
   const userManuallyToggledRef = React.useRef(false);
   const [logNow, setLogNow] = useState(false);
   const [logDate, setLogDate] = useState<string>(selectedDate || toLocalISODate());
@@ -52,16 +60,22 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
         loggedAt = targetDate.toISOString();
       }
 
-      // Persist custom unilateral preference for this exercise
+      // Persist custom unilateral & bodyweight preferences for this exercise
       await setExerciseUnilateral(name.trim(), splitSides);
+      await setExerciseIncludesBodyWeight(name.trim(), includesBW);
 
       const limbType = getLimbTypeForMuscle(effectiveGroup, name.trim());
       const namesToCreate = splitSides
         ? [`${name.trim()} (Left ${limbType})`, `${name.trim()} (Right ${limbType})`]
         : [name.trim()];
 
+      const effectiveWeight =
+        includesBW && bodyWeight > 0
+          ? Number(((Number(initialWeight) || 0) + bodyWeight).toFixed(2))
+          : Number(initialWeight) || 0;
+
       for (const exName of namesToCreate) {
-        if (logNow && (Number(initialWeight) > 0 || Number(initialReps) > 0)) {
+        if (logNow && (Number(initialWeight) > 0 || Number(initialReps) > 0 || (includesBW && bodyWeight > 0))) {
           await logExerciseSets({
             exerciseName: exName,
             targetMuscleGroup: effectiveGroup,
@@ -70,7 +84,7 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
             loggedAt,
             sets: Array.from({ length: Number(targetSets) > 0 ? Number(targetSets) : 3 }, (_, i) => ({
               setNumber: i + 1,
-              weight: Number(initialWeight) || 0,
+              weight: effectiveWeight,
               reps: Number(initialReps) || 0,
             })),
           });
@@ -84,7 +98,7 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
             sets: [
               {
                 setNumber: 1,
-                weight: Number(initialWeight) || 0,
+                weight: effectiveWeight,
                 reps: Number(initialReps) || 0,
               },
             ],
@@ -162,6 +176,21 @@ export const AddExerciseModal: React.FC<AddExerciseModalProps> = ({
                 setSplitSides(e.target.checked);
               }}
               className="w-4 h-4 rounded text-[#8bb4cb] focus:ring-0 cursor-pointer"
+            />
+          </div>
+
+          <div className="flex items-center justify-between bg-[#2d4554] border border-[#3f5d70] rounded-xl p-3">
+            <div>
+              <label className="text-xs font-bold text-white block">Include Body Weight (+BW)</label>
+              <span className="text-[10px] text-[#cbd5e1]">
+                Adds your body weight ({bodyWeight > 0 ? `${bodyWeight}kg` : 'set in Configuration'}) to additional weight
+              </span>
+            </div>
+            <input
+              type="checkbox"
+              checked={includesBW}
+              onChange={(e) => setIncludesBW(e.target.checked)}
+              className="w-4 h-4 rounded text-[#8fb89e] focus:ring-0 cursor-pointer"
             />
           </div>
 
