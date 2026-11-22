@@ -33,11 +33,25 @@ import {
 } from '../lib/calculations';
 import { ConsistencyHeatmap } from './ConsistencyHeatmap';
 
-const renderWorkingWeightDot = (props: any) => {
+const computeRepDotRadius = (
+  reps: number,
+  minReps: number,
+  maxReps: number,
+  minRadius = 3.5,
+  maxRadius = 11
+) => {
+  if (!Number.isFinite(reps) || maxReps <= minReps) {
+    return (minRadius + maxRadius) / 2 - 1;
+  }
+  const t = Math.min(1, Math.max(0, (reps - minReps) / (maxReps - minReps)));
+  return minRadius + t * (maxRadius - minRadius);
+};
+
+const createWorkingWeightDot = (minReps: number, maxReps: number) => (props: any) => {
   const { cx, cy, payload, index } = props;
   if (cx == null || cy == null) return <g key={`empty-${index}`} />;
   const reps = Number(payload?.avgReps ?? payload?.repsAtMax) || 0;
-  const r = Math.min(11, Math.max(3.5, 2.5 + Math.sqrt(reps) * 1.8));
+  const r = computeRepDotRadius(reps, minReps, maxReps, 3.5, 11);
   return (
     <circle
       key={`ww-dot-${index}`}
@@ -52,11 +66,11 @@ const renderWorkingWeightDot = (props: any) => {
   );
 };
 
-const renderWorkingWeightActiveDot = (props: any) => {
+const createWorkingWeightActiveDot = (minReps: number, maxReps: number) => (props: any) => {
   const { cx, cy, payload } = props;
   if (cx == null || cy == null) return <g />;
   const reps = Number(payload?.avgReps ?? payload?.repsAtMax) || 0;
-  const r = Math.min(13, Math.max(5, 4 + Math.sqrt(reps) * 1.8));
+  const r = computeRepDotRadius(reps, minReps, maxReps, 5, 13);
   return (
     <circle
       cx={cx}
@@ -325,12 +339,18 @@ export const AnalyticsView: React.FC = () => {
       points.flatMap((p) => [p.maxReps, p.avgReps]).filter((v) => v > 0)
     );
 
+    const avgRepsValues = points.map((p) => p.avgReps).filter((v) => Number.isFinite(v));
+    const minAvgReps = avgRepsValues.length > 0 ? Math.min(...avgRepsValues) : 0;
+    const maxAvgReps = avgRepsValues.length > 0 ? Math.max(...avgRepsValues) : 0;
+
     return {
       points,
       timeDomain,
       weightYDomain,
       percentYDomain,
       repsYDomain,
+      minAvgReps,
+      maxAvgReps,
       summary: {
         sessionsCount: points.length,
         lastDate: latestPoint?.rawDate || null,
@@ -552,8 +572,14 @@ export const AnalyticsView: React.FC = () => {
                         stroke="#8fb89e"
                         strokeWidth={2}
                         strokeDasharray="4 4"
-                        dot={renderWorkingWeightDot}
-                        activeDot={renderWorkingWeightActiveDot}
+                        dot={createWorkingWeightDot(
+                          focusedMovementData.minAvgReps,
+                          focusedMovementData.maxAvgReps
+                        )}
+                        activeDot={createWorkingWeightActiveDot(
+                          focusedMovementData.minAvgReps,
+                          focusedMovementData.maxAvgReps
+                        )}
                       />
                     </LineChart>
                   </ResponsiveContainer>
@@ -966,8 +992,14 @@ export const AnalyticsView: React.FC = () => {
                     stroke="#8fb89e"
                     strokeWidth={2}
                     strokeDasharray="4 4"
-                    dot={renderWorkingWeightDot}
-                    activeDot={renderWorkingWeightActiveDot}
+                    dot={createWorkingWeightDot(
+                      chartData.length > 0 ? Math.min(...chartData.map((p) => p.avgReps)) : 0,
+                      chartData.length > 0 ? Math.max(...chartData.map((p) => p.avgReps)) : 0
+                    )}
+                    activeDot={createWorkingWeightActiveDot(
+                      chartData.length > 0 ? Math.min(...chartData.map((p) => p.avgReps)) : 0,
+                      chartData.length > 0 ? Math.max(...chartData.map((p) => p.avgReps)) : 0
+                    )}
                   />
                 </LineChart>
               </ResponsiveContainer>
