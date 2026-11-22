@@ -887,11 +887,12 @@ export const AnalyticsView: React.FC = () => {
                     }}
                     formatter={(value: any, name: any) => [`${value} kg`, name]}
                     labelStyle={{ color: '#cbd5e1', fontWeight: 'bold' }}
-                    labelFormatter={(val: any) => {
+                    labelFormatter={(val: any, payload: any) => {
+                      const range = payload?.[0]?.payload?.rawDate;
+                      if (range) return `2-Week Period: ${range}`;
                       if (!val) return '';
                       const d = new Date(Number(val));
                       return d.toLocaleDateString(undefined, {
-                        weekday: 'short',
                         month: 'short',
                         day: 'numeric',
                         year: 'numeric',
@@ -935,7 +936,7 @@ export const AnalyticsView: React.FC = () => {
               <span>Composite Strength Growth (All Movements)</span>
             </h3>
             <p className="text-xs text-[#cbd5e1] font-medium">
-              Average percentage 1RM change across all movements relative to their initial baselines
+              2-week binned average % 1RM growth using each movement&apos;s best attempt per 2-week period
             </p>
           </div>
 
@@ -981,11 +982,12 @@ export const AnalyticsView: React.FC = () => {
                       'Average Growth vs Baseline',
                     ]}
                     labelStyle={{ color: '#cbd5e1', fontWeight: 'bold' }}
-                    labelFormatter={(val: any) => {
+                    labelFormatter={(val: any, payload: any) => {
+                      const range = payload?.[0]?.payload?.rawDate;
+                      if (range) return `2-Week Period: ${range}`;
                       if (!val) return '';
                       const d = new Date(Number(val));
                       return d.toLocaleDateString(undefined, {
-                        weekday: 'short',
                         month: 'short',
                         day: 'numeric',
                         year: 'numeric',

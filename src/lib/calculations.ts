@@ -496,54 +496,114 @@ export function calculateNormalizedProgression(
     return [];
   }
 
-  // 2. Determine original baseline 1RM for each exercise
-  const baselineMap = new Map<string, number>();
+  // 2. Partition timeline into 2-week (14-day) bins starting from the first session's local midnight
+  const firstSessionDate = new Date(distinctSessionTimestamps[0].timestamp);
+  const firstMidnight = new Date(
+    firstSessionDate.getFullYear(),
+    firstSessionDate.getMonth(),
+    firstSessionDate.getDate()
+  ).getTime();
+
+  const lastSessionDate = new Date(
+    distinctSessionTimestamps[distinctSessionTimestamps.length - 1].timestamp
+  );
+  const lastMidnight = new Date(
+    lastSessionDate.getFullYear(),
+    lastSessionDate.getMonth(),
+    lastSessionDate.getDate()
+  ).getTime();
+
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const binLengthMs = 14 * msPerDay;
+  const numBins = Math.max(1, Math.floor((lastMidnight - firstMidnight) / binLengthMs) + 1);
+
+  // Helper to get bin index (0-based) for a timestamp
+  const getBinIndex = (ts: number) => {
+    const d = new Date(ts);
+    const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    return Math.max(0, Math.floor((midnight - firstMidnight) / binLengthMs));
+  };
+
+  // Map each exercise -> Map<binIndex, best1RM in that 2-week bin>
+  const exerciseBinBest = new Map<string, Map<number, number>>();
+  const activeBins = new Set<number>();
+
   exercisePerfs.forEach((perfs, exName) => {
-    // Sort chronologically
-    perfs.sort((a, b) => a.timestamp - b.timestamp);
-    if (perfs.length > 0) {
-      baselineMap.set(exName, perfs[0].best1RM);
+    const binMap = new Map<number, number>();
+    perfs.forEach((p) => {
+      const bIdx = getBinIndex(p.timestamp);
+      activeBins.add(bIdx);
+      const prev = binMap.get(bIdx) || 0;
+      if (p.best1RM > prev) {
+        binMap.set(bIdx, p.best1RM);
+      }
+    });
+    if (binMap.size > 0) {
+      exerciseBinBest.set(exName, binMap);
     }
   });
 
-  // 3. For each date timestamp, evaluate the normalized score across all exercises
-  // that have started by that date, carrying forward their most recent 1RM.
-  const points: NormalizedProgressPoint[] = [];
+  // 3. Determine baseline 1RM for each exercise (best attempt in its first active 2-week bin)
+  const baselineMap = new Map<string, { firstBin: number; baseline1RM: number }>();
+  exerciseBinBest.forEach((binMap, exName) => {
+    const firstBin = Math.min(...Array.from(binMap.keys()));
+    const baseline1RM = binMap.get(firstBin) || 0;
+    if (baseline1RM > 0) {
+      baselineMap.set(exName, { firstBin, baseline1RM });
+    }
+  });
 
-  distinctSessionTimestamps.forEach(({ timestamp, rawDate }) => {
+  // 4. For each 2-week bin that has activity, take the best attempt of each movement in that bin
+  // (carrying forward its previous bin's best if a movement was not logged during that 2-week window)
+  const points: NormalizedProgressPoint[] = [];
+  const latestBestByExercise = new Map<string, number>();
+
+  for (let bIdx = 0; bIdx < numBins; bIdx++) {
+    // Update latest bests with any movement performed in this bin
+    exerciseBinBest.forEach((binMap, exName) => {
+      const bestInBin = binMap.get(bIdx);
+      if (bestInBin !== undefined && bestInBin > 0) {
+        latestBestByExercise.set(exName, bestInBin);
+      }
+    });
+
+    if (!activeBins.has(bIdx)) continue;
+
     const ratios: number[] = [];
     const contributing: string[] = [];
 
-    exercisePerfs.forEach((perfs, exName) => {
-      const baseline = baselineMap.get(exName);
-      if (!baseline || baseline <= 0) return;
-
-      // Find all performances on or before this timestamp
-      const pastOrCurrentPerfs = perfs.filter((p) => p.timestamp <= timestamp);
-      if (pastOrCurrentPerfs.length === 0) return; // Exercise hasn't started yet
-
-      const latestPerf = pastOrCurrentPerfs[pastOrCurrentPerfs.length - 1];
-      const ratio = latestPerf.best1RM / baseline;
-      ratios.push(ratio);
-      contributing.push(exName);
+    baselineMap.forEach(({ firstBin, baseline1RM }, exName) => {
+      if (bIdx < firstBin || baseline1RM <= 0) return;
+      const currentBest = latestBestByExercise.get(exName);
+      if (currentBest !== undefined && currentBest > 0) {
+        ratios.push(currentBest / baseline1RM);
+        contributing.push(exName);
+      }
     });
 
     if (ratios.length > 0) {
       const avgRatio = ratios.reduce((sum, r) => sum + r, 0) / ratios.length;
-      const growthPct = Math.round((avgRatio - 1.0) * 1000) / 10; // e.g. +8.5%
+      const growthPct = Math.round((avgRatio - 1.0) * 1000) / 10;
 
-      const d = new Date(timestamp);
+      const binStart = new Date(firstMidnight + bIdx * binLengthMs);
+      const binEnd = new Date(Math.min(lastMidnight, firstMidnight + (bIdx + 1) * binLengthMs - msPerDay));
+      const binMidMs = Math.round((binStart.getTime() + binEnd.getTime()) / 2);
+
+      const startLabel = binStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const endLabel = binEnd.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const rangeLabel = startLabel === endLabel ? startLabel : `${startLabel} – ${endLabel}`;
+
       points.push({
-        timestamp,
-        date: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-        rawDate,
+        timestamp: binMidMs,
+        date: startLabel,
+        rawDate: rangeLabel,
         normalizedGrowthPercent: growthPct,
         averageGrowthMultiplier: Math.round(avgRatio * 100) / 100,
         coveredExercisesCount: ratios.length,
         contributingExercises: contributing,
       });
     }
-  });
+  }
 
   return points;
 }
