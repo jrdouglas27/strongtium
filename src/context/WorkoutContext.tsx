@@ -8,7 +8,14 @@ import {
   LastExercisePerformance,
   LogExercisePayload,
 } from '../types/workout';
-import { calculate1RM, getBaseExerciseName, getLimbTypeForMuscle, isUnilateralExercise, isUnilateralMovement } from '../lib/calculations';
+import {
+  calculate1RM,
+  getBaseExerciseName,
+  getLimbTypeForMuscle,
+  isUnilateralExercise,
+  isUnilateralMovement,
+  toLocalISODate,
+} from '../lib/calculations';
 import { STARTER_ROUTINES } from '../lib/starterData';
 
 export interface ExerciseHistoryEntry {
@@ -56,10 +63,14 @@ interface WorkoutContextType {
   setExerciseUnilateral: (exerciseName: string, isUnilateral: boolean) => Promise<void>;
   isExerciseUnilateral: (exerciseName: string, muscle?: string) => boolean;
   bodyWeight: number;
+  bodyWeightHistory: { date: string; weight: number }[];
   setBodyWeight: (weight: number) => Promise<void>;
+  getBodyWeightForDate: (dateStr?: string) => number;
   bodyweightPreferences: Record<string, boolean>;
   setExerciseIncludesBodyWeight: (exerciseName: string, includesBodyWeight: boolean) => Promise<void>;
   doesExerciseIncludeBodyWeight: (exerciseName: string) => boolean;
+  getBackfillSummary: () => { exercisesCount: number; setsCount: number; exerciseNames: string[] };
+  backfillBodyWeightHistory: () => Promise<{ updatedExercises: number; updatedSets: number }>;
 }
 
 const WorkoutContext = createContext<WorkoutContextType | undefined>(undefined);
@@ -68,7 +79,10 @@ const LOCAL_STORAGE_ROUTINES = 'strongtium_routines';
 const LOCAL_STORAGE_SESSIONS = 'strongtium_sessions';
 const LOCAL_STORAGE_UNILATERAL = 'strongtium_unilateral_preferences';
 const LOCAL_STORAGE_BODY_WEIGHT = 'strongtium_body_weight';
+const LOCAL_STORAGE_BODY_WEIGHT_HISTORY = 'strongtium_body_weight_history';
 const LOCAL_STORAGE_BODYWEIGHT_PREFS = 'strongtium_bodyweight_preferences';
+const LOCAL_STORAGE_BW_ENABLED_SINCE = 'strongtium_bw_enabled_since';
+const LOCAL_STORAGE_BW_BACKFILLED_UNTIL = 'strongtium_bw_backfilled_until';
 
 export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
@@ -96,6 +110,30 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [bodyweightPreferences, setBodyweightPreferences] = useState<Record<string, boolean>>(() => {
     try {
       const raw = localStorage.getItem(LOCAL_STORAGE_BODYWEIGHT_PREFS);
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) {
+      return {};
+    }
+  });
+  const [bodyWeightHistory, setBodyWeightHistory] = useState<{ date: string; weight: number }[]>(() => {
+    try {
+      const raw = localStorage.getItem(LOCAL_STORAGE_BODY_WEIGHT_HISTORY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+  const [bwEnabledSince, setBwEnabledSince] = useState<Record<string, string>>(() => {
+    try {
+      const raw = localStorage.getItem(LOCAL_STORAGE_BW_ENABLED_SINCE);
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) {
+      return {};
+    }
+  });
+  const [bwBackfilledUntil, setBwBackfilledUntil] = useState<Record<string, string>>(() => {
+    try {
+      const raw = localStorage.getItem(LOCAL_STORAGE_BW_BACKFILLED_UNTIL);
       return raw ? JSON.parse(raw) : {};
     } catch (e) {
       return {};
@@ -176,6 +214,35 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
         // ignore
       }
     }
+
+    if (Array.isArray(user?.user_metadata?.body_weight_history)) {
+      const remoteHist = user.user_metadata.body_weight_history;
+      setBodyWeightHistory(remoteHist);
+      try {
+        localStorage.setItem(LOCAL_STORAGE_BODY_WEIGHT_HISTORY, JSON.stringify(remoteHist));
+        if (user.id) {
+          localStorage.setItem(`${LOCAL_STORAGE_BODY_WEIGHT_HISTORY}_${user.id}`, JSON.stringify(remoteHist));
+        }
+      } catch (e) {
+        // ignore
+      }
+    } else if (user?.id) {
+      try {
+        const localHist = localStorage.getItem(`${LOCAL_STORAGE_BODY_WEIGHT_HISTORY}_${user.id}`);
+        if (localHist) setBodyWeightHistory(JSON.parse(localHist));
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    if (user?.user_metadata?.bw_enabled_since) {
+      const remoteSince = user.user_metadata.bw_enabled_since;
+      setBwEnabledSince((prev) => ({ ...prev, ...remoteSince }));
+    }
+    if (user?.user_metadata?.bw_backfilled_until) {
+      const remoteUntil = user.user_metadata.bw_backfilled_until;
+      setBwBackfilledUntil((prev) => ({ ...prev, ...remoteUntil }));
+    }
   }, [user]);
 
   const setExerciseUnilateral = useCallback(
@@ -227,20 +294,39 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
     async (weight: number) => {
       const sanitized = isNaN(weight) || weight < 0 ? 0 : Number(weight.toFixed(2));
       setBodyWeightState(sanitized);
-      try {
-        localStorage.setItem(LOCAL_STORAGE_BODY_WEIGHT, String(sanitized));
-        if (user?.id) {
-          localStorage.setItem(`${LOCAL_STORAGE_BODY_WEIGHT}_${user.id}`, String(sanitized));
+
+      const todayStr = toLocalISODate();
+      let nextHistory: { date: string; weight: number }[] = [];
+      setBodyWeightHistory((prev) => {
+        const filtered = prev.filter((entry) => entry.date !== todayStr);
+        nextHistory =
+          sanitized > 0
+            ? [...filtered, { date: todayStr, weight: sanitized }].sort((a, b) =>
+                a.date.localeCompare(b.date)
+              )
+            : filtered;
+        try {
+          localStorage.setItem(LOCAL_STORAGE_BODY_WEIGHT, String(sanitized));
+          localStorage.setItem(LOCAL_STORAGE_BODY_WEIGHT_HISTORY, JSON.stringify(nextHistory));
+          if (user?.id) {
+            localStorage.setItem(`${LOCAL_STORAGE_BODY_WEIGHT}_${user.id}`, String(sanitized));
+            localStorage.setItem(
+              `${LOCAL_STORAGE_BODY_WEIGHT_HISTORY}_${user.id}`,
+              JSON.stringify(nextHistory)
+            );
+          }
+        } catch (e) {
+          console.error('Failed to save body weight', e);
         }
-      } catch (e) {
-        console.error('Failed to save body weight', e);
-      }
+        return nextHistory;
+      });
 
       if (user) {
         try {
           await supabase.auth.updateUser({
             data: {
               body_weight: sanitized,
+              body_weight_history: nextHistory,
             },
           });
         } catch (err) {
@@ -251,10 +337,47 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
     [user]
   );
 
+  const getBodyWeightForDate = useCallback(
+    (dateStr?: string) => {
+      if (bodyWeightHistory.length === 0) return bodyWeight;
+      const target = dateStr
+        ? dateStr.includes('T')
+          ? toLocalISODate(new Date(dateStr))
+          : dateStr
+        : toLocalISODate();
+
+      // bodyWeightHistory is sorted ascending by date (YYYY-MM-DD)
+      let matched: number | null = null;
+      for (const entry of bodyWeightHistory) {
+        if (entry.date <= target) {
+          matched = entry.weight;
+        } else {
+          break;
+        }
+      }
+      if (matched !== null) return matched;
+      // If target date is earlier than the first recorded body weight, use the earliest recorded weight
+      return bodyWeightHistory[0]?.weight ?? bodyWeight;
+    },
+    [bodyWeight, bodyWeightHistory]
+  );
+
   const setExerciseIncludesBodyWeight = useCallback(
     async (exerciseName: string, includesBodyWeight: boolean) => {
       const cleanName = getBaseExerciseName(exerciseName).trim().toLowerCase();
       if (!cleanName) return;
+
+      const nowIso = new Date().toISOString();
+      let updatedSince = bwEnabledSince;
+      if (includesBodyWeight && !bwEnabledSince[cleanName]) {
+        updatedSince = { ...bwEnabledSince, [cleanName]: nowIso };
+        setBwEnabledSince(updatedSince);
+        try {
+          localStorage.setItem(LOCAL_STORAGE_BW_ENABLED_SINCE, JSON.stringify(updatedSince));
+        } catch (e) {
+          // ignore
+        }
+      }
 
       setBodyweightPreferences((prev) => {
         const updated = { ...prev, [cleanName]: includesBodyWeight };
@@ -279,6 +402,7 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 ...currentPrefs,
                 [cleanName]: includesBodyWeight,
               },
+              bw_enabled_since: updatedSince,
             },
           });
         } catch (err) {
@@ -286,7 +410,7 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
       }
     },
-    [user]
+    [user, bwEnabledSince]
   );
 
   const doesExerciseIncludeBodyWeight = useCallback(
@@ -1305,6 +1429,171 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
+  // Identify past logged exercises with +BW enabled that haven't been backfilled yet
+  const getEligibleBackfillTargets = useCallback(() => {
+    const nowIso = new Date().toISOString();
+    const targets: {
+      sessionId: string;
+      sessionDate: string;
+      loggedExerciseId: string;
+      baseName: string;
+      cleanName: string;
+      cutoffIso: string;
+      bwToAdd: number;
+      sets: { id: string; weight: number; reps: number }[];
+    }[] = [];
+
+    if (bodyWeight <= 0) return targets;
+
+    sessions.forEach((s) => {
+      const sessionDate = s.completed_at || s.started_at;
+      if (!sessionDate) return;
+      const sessionMs = new Date(sessionDate).getTime();
+
+      (s.logged_exercises || []).forEach((le) => {
+        const baseName = getBaseExerciseName(le.exercise_name);
+        const cleanName = baseName.trim().toLowerCase();
+        if (!cleanName || !bodyweightPreferences[cleanName]) return;
+
+        const cutoffIso = bwEnabledSince[cleanName] || nowIso;
+        const cutoffMs = new Date(cutoffIso).getTime();
+        const backfilledMs = bwBackfilledUntil[cleanName]
+          ? new Date(bwBackfilledUntil[cleanName]).getTime()
+          : -Infinity;
+
+        if (sessionMs <= cutoffMs && sessionMs > backfilledMs && le.sets.length > 0) {
+          const bwToAdd = getBodyWeightForDate(sessionDate) || bodyWeight;
+          if (bwToAdd > 0) {
+            targets.push({
+              sessionId: s.id,
+              sessionDate,
+              loggedExerciseId: le.id,
+              baseName,
+              cleanName,
+              cutoffIso,
+              bwToAdd,
+              sets: le.sets.map((st) => ({
+                id: st.id,
+                weight: Number(st.weight) || 0,
+                reps: Number(st.reps) || 0,
+              })),
+            });
+          }
+        }
+      });
+    });
+
+    return targets;
+  }, [sessions, bodyWeight, bodyweightPreferences, bwEnabledSince, bwBackfilledUntil, getBodyWeightForDate]);
+
+  const getBackfillSummary = useCallback(() => {
+    const targets = getEligibleBackfillTargets();
+    const nameSet = new Set<string>();
+    let setsCount = 0;
+    targets.forEach((t) => {
+      nameSet.add(t.baseName);
+      setsCount += t.sets.length;
+    });
+    return {
+      exercisesCount: targets.length,
+      setsCount,
+      exerciseNames: Array.from(nameSet),
+    };
+  }, [getEligibleBackfillTargets]);
+
+  const backfillBodyWeightHistory = useCallback(async () => {
+    const targets = getEligibleBackfillTargets();
+    if (targets.length === 0) {
+      return { updatedExercises: 0, updatedSets: 0 };
+    }
+
+    let updatedSets = 0;
+    const nextBackfilledUntil = { ...bwBackfilledUntil };
+    const nextEnabledSince = { ...bwEnabledSince };
+
+    // Update Supabase logged_sets rows if authenticated
+    if (user) {
+      for (const target of targets) {
+        for (const st of target.sets) {
+          const newWeight = Number((st.weight + target.bwToAdd).toFixed(2));
+          if (st.id) {
+            const { error } = await supabase
+              .from('logged_sets')
+              .update({ weight: newWeight })
+              .eq('id', st.id);
+            if (error) {
+              console.error('Failed to backfill logged_set:', error);
+            } else {
+              updatedSets += 1;
+            }
+          }
+        }
+        nextBackfilledUntil[target.cleanName] = target.cutoffIso;
+        if (!nextEnabledSince[target.cleanName]) {
+          nextEnabledSince[target.cleanName] = target.cutoffIso;
+        }
+      }
+    }
+
+    // Also update local state & localStorage
+    const setIdToNewWeight = new Map<string, number>();
+    targets.forEach((t) => {
+      t.sets.forEach((st) => {
+        setIdToNewWeight.set(st.id, Number((st.weight + t.bwToAdd).toFixed(2)));
+        if (!user) updatedSets += 1;
+      });
+      nextBackfilledUntil[t.cleanName] = t.cutoffIso;
+      if (!nextEnabledSince[t.cleanName]) {
+        nextEnabledSince[t.cleanName] = t.cutoffIso;
+      }
+    });
+
+    setBwBackfilledUntil(nextBackfilledUntil);
+    setBwEnabledSince(nextEnabledSince);
+    try {
+      localStorage.setItem(LOCAL_STORAGE_BW_BACKFILLED_UNTIL, JSON.stringify(nextBackfilledUntil));
+      localStorage.setItem(LOCAL_STORAGE_BW_ENABLED_SINCE, JSON.stringify(nextEnabledSince));
+    } catch (e) {
+      // ignore
+    }
+
+    if (user) {
+      try {
+        await supabase.auth.updateUser({
+          data: {
+            bw_backfilled_until: nextBackfilledUntil,
+            bw_enabled_since: nextEnabledSince,
+          },
+        });
+      } catch (err) {
+        console.warn('Could not sync bw_backfilled_until to Supabase user metadata:', err);
+      }
+      await fetchData();
+    } else {
+      setSessions((prev) => {
+        const updated = prev.map((s) => ({
+          ...s,
+          logged_exercises: (s.logged_exercises || []).map((le) => ({
+            ...le,
+            sets: (le.sets || []).map((st) =>
+              setIdToNewWeight.has(st.id)
+                ? { ...st, weight: setIdToNewWeight.get(st.id)! }
+                : st
+            ),
+          })),
+        }));
+        localStorage.setItem(LOCAL_STORAGE_SESSIONS, JSON.stringify(updated));
+        computePRs(updated);
+        return updated;
+      });
+    }
+
+    return {
+      updatedExercises: targets.length,
+      updatedSets,
+    };
+  }, [getEligibleBackfillTargets, bwBackfilledUntil, bwEnabledSince, user, computePRs]);
+
   return (
     <WorkoutContext.Provider
       value={{
@@ -1332,10 +1621,14 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setExerciseUnilateral,
         isExerciseUnilateral,
         bodyWeight,
+        bodyWeightHistory,
         setBodyWeight,
+        getBodyWeightForDate,
         bodyweightPreferences,
         setExerciseIncludesBodyWeight,
         doesExerciseIncludeBodyWeight,
+        getBackfillSummary,
+        backfillBodyWeightHistory,
       }}
     >
       {children}

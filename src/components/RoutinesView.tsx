@@ -33,6 +33,8 @@ export const RoutinesView: React.FC = () => {
     setBodyWeight,
     doesExerciseIncludeBodyWeight,
     setExerciseIncludesBodyWeight,
+    getBackfillSummary,
+    backfillBodyWeightHistory,
   } = useWorkout();
 
   const [activeViewMode, setActiveViewMode] = useState<'splits' | 'matrix' | 'text'>('splits');
@@ -41,6 +43,10 @@ export const RoutinesView: React.FC = () => {
   // Body Weight Input State
   const [bwInput, setBwInput] = useState<string>(bodyWeight > 0 ? String(bodyWeight) : '');
   const [bwSavedFeedback, setBwSavedFeedback] = useState(false);
+  const [isBackfilling, setIsBackfilling] = useState(false);
+  const [backfillResultMsg, setBackfillResultMsg] = useState<string | null>(null);
+
+  const backfillSummary = getBackfillSummary();
 
   React.useEffect(() => {
     setBwInput(bodyWeight > 0 ? String(bodyWeight) : '');
@@ -52,6 +58,28 @@ export const RoutinesView: React.FC = () => {
     await setBodyWeight(isNaN(parsed) || parsed < 0 ? 0 : parsed);
     setBwSavedFeedback(true);
     setTimeout(() => setBwSavedFeedback(false), 2000);
+  };
+
+  const handleBackfillBW = async () => {
+    if (bodyWeight <= 0 || backfillSummary.setsCount === 0) return;
+    if (
+      !confirm(
+        `Add your body weight (${bodyWeight}kg) to ${backfillSummary.setsCount} previously logged set(s) across: ${backfillSummary.exerciseNames.join(', ')}?`
+      )
+    ) {
+      return;
+    }
+    setIsBackfilling(true);
+    setBackfillResultMsg(null);
+    try {
+      const res = await backfillBodyWeightHistory();
+      setBackfillResultMsg(
+        `Backfilled ${res.updatedSets} set(s) across ${res.updatedExercises} logged movement(s)!`
+      );
+      setTimeout(() => setBackfillResultMsg(null), 5000);
+    } finally {
+      setIsBackfilling(false);
+    }
   };
 
   // Quick Add Exercise State
@@ -361,51 +389,78 @@ Plank / Ab Wheel Rollout (3 sets)`;
       </div>
 
       {/* Body Weight Setting Card */}
-      <form
-        onSubmit={handleSaveBodyWeight}
-        className="bg-[#3d5a6c] border border-[#4e7085] rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-      >
-        <div className="flex items-start sm:items-center space-x-3">
-          <div className="p-2.5 bg-[#2d4554] border border-[#3f5d70] rounded-xl text-[#8fb89e] shrink-0">
-            <Scale className="w-5 h-5" />
+      <div className="bg-[#3d5a6c] border border-[#4e7085] rounded-2xl p-4 sm:p-5 shadow-sm space-y-3">
+        <form
+          onSubmit={handleSaveBodyWeight}
+          className="flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+        >
+          <div className="flex items-start sm:items-center space-x-3">
+            <div className="p-2.5 bg-[#2d4554] border border-[#3f5d70] rounded-xl text-[#8fb89e] shrink-0">
+              <Scale className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-extrabold text-white">Your Body Weight</h3>
+              <p className="text-xs text-[#cbd5e1] font-medium">
+                Added to your additional weight for movements marked <strong className="text-[#8fb89e]">+BW</strong> (e.g. Calf Raise, Squat) to compute total rep weight.
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-sm font-extrabold text-white">Your Body Weight</h3>
-            <p className="text-xs text-[#cbd5e1] font-medium">
-              Added to your additional weight for movements marked <strong className="text-[#8fb89e]">+BW</strong> (e.g. Calf Raise, Squat) to compute total rep weight.
-            </p>
-          </div>
-        </div>
 
-        <div className="flex items-center space-x-2 shrink-0 self-start sm:self-auto">
-          <div className="relative flex items-center">
-            <input
-              type="number"
-              step="0.5"
-              min={0}
-              max={400}
-              placeholder="e.g. 75"
-              value={bwInput}
-              onChange={(e) => setBwInput(e.target.value)}
-              className="w-28 bg-[#2d4554] border border-[#3f5d70] rounded-xl pl-3 pr-8 py-2 text-xs text-white font-mono font-bold focus:outline-none focus:border-[#8bb4cb]"
-            />
-            <span className="text-[11px] text-[#94a3b8] font-mono font-bold absolute right-2.5 pointer-events-none">
-              kg
-            </span>
+          <div className="flex items-center space-x-2 shrink-0 self-start sm:self-auto">
+            <div className="relative flex items-center">
+              <input
+                type="number"
+                step="0.5"
+                min={0}
+                max={400}
+                placeholder="e.g. 75"
+                value={bwInput}
+                onChange={(e) => setBwInput(e.target.value)}
+                className="w-28 bg-[#2d4554] border border-[#3f5d70] rounded-xl pl-3 pr-8 py-2 text-xs text-white font-mono font-bold focus:outline-none focus:border-[#8bb4cb]"
+              />
+              <span className="text-[11px] text-[#94a3b8] font-mono font-bold absolute right-2.5 pointer-events-none">
+                kg
+              </span>
+            </div>
+            <button
+              type="submit"
+              className={`px-4 py-2 rounded-xl text-xs font-extrabold transition shadow-sm border flex items-center space-x-1.5 ${
+                bwSavedFeedback
+                  ? 'bg-[#8fb89e] text-[#0e2a18] border-[#78a387]'
+                  : 'bg-[#8bb4cb] hover:bg-[#749fb7] text-[#0e2938] border-[#749fb7]'
+              }`}
+            >
+              {bwSavedFeedback ? <Check className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
+              <span>{bwSavedFeedback ? 'Saved!' : 'Save BW'}</span>
+            </button>
           </div>
-          <button
-            type="submit"
-            className={`px-4 py-2 rounded-xl text-xs font-extrabold transition shadow-sm border flex items-center space-x-1.5 ${
-              bwSavedFeedback
-                ? 'bg-[#8fb89e] text-[#0e2a18] border-[#78a387]'
-                : 'bg-[#8bb4cb] hover:bg-[#749fb7] text-[#0e2938] border-[#749fb7]'
-            }`}
-          >
-            {bwSavedFeedback ? <Check className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
-            <span>{bwSavedFeedback ? 'Saved!' : 'Save BW'}</span>
-          </button>
-        </div>
-      </form>
+        </form>
+
+        {/* Backfill Previous +BW Sessions Banner */}
+        {bodyWeight > 0 && backfillSummary.setsCount > 0 && (
+          <div className="pt-3 border-t border-[#4e7085]/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="text-xs text-[#cbd5e1]">
+              <strong className="text-white">{backfillSummary.setsCount}</strong> previously logged set(s) for{' '}
+              <strong className="text-[#8fb89e]">{backfillSummary.exerciseNames.join(', ')}</strong> don&apos;t include your{' '}
+              <strong className="text-white">{bodyWeight}kg</strong> body weight yet.
+            </div>
+            <button
+              type="button"
+              disabled={isBackfilling}
+              onClick={handleBackfillBW}
+              className="shrink-0 self-start sm:self-auto px-3.5 py-1.5 rounded-xl text-xs font-extrabold bg-[#274a38] hover:bg-[#315d46] text-[#8fb89e] border border-[#3c6e54] transition disabled:opacity-50"
+            >
+              {isBackfilling ? 'Backfilling...' : `Backfill Past Logs (+${bodyWeight}kg)`}
+            </button>
+          </div>
+        )}
+
+        {backfillResultMsg && (
+          <div className="text-xs font-bold text-[#8fb89e] bg-[#274a38]/60 border border-[#3c6e54] rounded-xl px-3 py-2">
+            {backfillResultMsg}
+          </div>
+        )}
+      </div>
 
       {/* Quick Add Exercise Bar */}
       <div className="bg-[#3d5a6c] border border-[#4e7085] rounded-2xl p-4 sm:p-5 shadow-sm space-y-3">

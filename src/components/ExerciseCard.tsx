@@ -67,9 +67,14 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
     sessions,
     setExerciseUnilateral,
     isExerciseUnilateral,
-    bodyWeight,
+    getBodyWeightForDate,
     doesExerciseIncludeBodyWeight,
   } = useWorkout();
+
+  // Date context: defaults to local today if not specified
+  const activeDate = selectedDate || toLocalISODate();
+  const isToday = activeDate === toLocalISODate();
+  const dateLabel = formatWorkoutDateLabel(activeDate);
 
   // Determine base exercise name and limb type ('Arm' vs 'Leg')
   const baseName = getBaseExerciseName(exerciseName);
@@ -78,14 +83,16 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
   const rightExerciseName = `${baseName} (Right ${limbType})`;
 
   const includesBodyWeight = doesExerciseIncludeBodyWeight(baseName);
-  const activeBodyWeight = includesBodyWeight && bodyWeight > 0 ? bodyWeight : 0;
+  const bwForActiveDate = getBodyWeightForDate(activeDate);
+  const activeBodyWeight = includesBodyWeight && bwForActiveDate > 0 ? bwForActiveDate : 0;
 
   const toAdditionalWeight = useCallback(
-    (totalWeight: number) =>
-      activeBodyWeight > 0
-        ? Math.max(0, Number((totalWeight - activeBodyWeight).toFixed(2)))
-        : totalWeight,
-    [activeBodyWeight]
+    (totalWeight: number, dateStr?: string) => {
+      if (!includesBodyWeight) return totalWeight;
+      const bw = dateStr ? getBodyWeightForDate(dateStr) : activeBodyWeight;
+      return bw > 0 ? Math.max(0, Number((totalWeight - bw).toFixed(2))) : totalWeight;
+    },
+    [includesBodyWeight, activeBodyWeight, getBodyWeightForDate]
   );
 
   const toTotalWeight = useCallback(
@@ -103,11 +110,6 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
   );
 
   const [unilateralViewMode, setUnilateralViewMode] = useState<'combined' | 'columns' | 'left' | 'right'>('combined');
-
-  // Date context: defaults to local today if not specified
-  const activeDate = selectedDate || toLocalISODate();
-  const isToday = activeDate === toLocalISODate();
-  const dateLabel = formatWorkoutDateLabel(activeDate);
 
   // Retrieve performances
   const leftPerf = getLastPerformance(leftExerciseName) || getLastPerformance(baseName);
@@ -223,9 +225,13 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
       const prevR = rightPerf?.sets[i] || rightPerf?.sets[rightPerf.sets.length - 1];
       return {
         setNumber: i + 1,
-        leftWeight: prevL ? toAdditionalWeight(prevL.weight) : 0,
+        leftWeight: prevL ? toAdditionalWeight(prevL.weight, leftPerf?.last_performed_at) : 0,
         leftReps: prevL ? prevL.reps : 0,
-        rightWeight: prevR ? toAdditionalWeight(prevR.weight) : (prevL ? toAdditionalWeight(prevL.weight) : 0),
+        rightWeight: prevR
+          ? toAdditionalWeight(prevR.weight, rightPerf?.last_performed_at)
+          : prevL
+          ? toAdditionalWeight(prevL.weight, leftPerf?.last_performed_at)
+          : 0,
         rightReps: prevR ? prevR.reps : (prevL ? prevL.reps : 0),
         isCompleted: false,
       };
@@ -248,7 +254,7 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
       const prevSet = bilateralPerf?.sets[i] || bilateralPerf?.sets[bilateralPerf.sets.length - 1];
       return {
         setNumber: i + 1,
-        weight: prevSet ? toAdditionalWeight(prevSet.weight) : 0,
+        weight: prevSet ? toAdditionalWeight(prevSet.weight, bilateralPerf?.last_performed_at) : 0,
         reps: prevSet ? prevSet.reps : 0,
         isCompleted: false,
       };
@@ -442,9 +448,13 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
       const pR = rightPerf?.sets[i] || rightPerf?.sets[rightPerf.sets.length - 1];
       return {
         setNumber: i + 1,
-        leftWeight: pL ? toAdditionalWeight(pL.weight) : 0,
+        leftWeight: pL ? toAdditionalWeight(pL.weight, leftPerf?.last_performed_at) : 0,
         leftReps: pL ? pL.reps : 0,
-        rightWeight: pR ? toAdditionalWeight(pR.weight) : (pL ? toAdditionalWeight(pL.weight) : 0),
+        rightWeight: pR
+          ? toAdditionalWeight(pR.weight, rightPerf?.last_performed_at)
+          : pL
+          ? toAdditionalWeight(pL.weight, leftPerf?.last_performed_at)
+          : 0,
         rightReps: pR ? pR.reps : (pL ? pL.reps : 0),
         isCompleted: false,
       };
@@ -503,7 +513,7 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
     setBiSets(
       bilateralPerf.sets.map((ps, idx) => ({
         setNumber: idx + 1,
-        weight: toAdditionalWeight(ps.weight),
+        weight: toAdditionalWeight(ps.weight, bilateralPerf.last_performed_at),
         reps: ps.reps,
         isCompleted: false,
       }))
