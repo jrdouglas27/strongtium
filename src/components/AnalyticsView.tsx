@@ -33,6 +33,42 @@ import {
 } from '../lib/calculations';
 import { ConsistencyHeatmap } from './ConsistencyHeatmap';
 
+const renderWorkingWeightDot = (props: any) => {
+  const { cx, cy, payload, index } = props;
+  if (cx == null || cy == null) return <g key={`empty-${index}`} />;
+  const reps = Number(payload?.avgReps ?? payload?.repsAtMax) || 0;
+  const r = Math.min(11, Math.max(3.5, 2.5 + Math.sqrt(reps) * 1.8));
+  return (
+    <circle
+      key={`ww-dot-${index}`}
+      cx={cx}
+      cy={cy}
+      r={r}
+      fill="#8fb89e"
+      fillOpacity={0.88}
+      stroke="#223541"
+      strokeWidth={1.5}
+    />
+  );
+};
+
+const renderWorkingWeightActiveDot = (props: any) => {
+  const { cx, cy, payload } = props;
+  if (cx == null || cy == null) return <g />;
+  const reps = Number(payload?.avgReps ?? payload?.repsAtMax) || 0;
+  const r = Math.min(13, Math.max(5, 4 + Math.sqrt(reps) * 1.8));
+  return (
+    <circle
+      cx={cx}
+      cy={cy}
+      r={r}
+      fill="#8fb89e"
+      stroke="#ffffff"
+      strokeWidth={2}
+    />
+  );
+};
+
 export const AnalyticsView: React.FC = () => {
   const { sessions, personalRecords } = useWorkout();
 
@@ -90,6 +126,7 @@ export const AnalyticsView: React.FC = () => {
       estimated1RM: number;
       totalVolume: number;
       repsAtMax: number;
+      avgReps: number;
       notes?: string;
     }[] = [];
 
@@ -112,12 +149,14 @@ export const AnalyticsView: React.FC = () => {
         let maxW = 0;
         let best1RM = 0;
         let repsAtMax = 0;
+        let totalReps = 0;
         let vol = 0;
 
         ex.sets.forEach((s) => {
           const w = Number(s.weight) || 0;
           const r = Number(s.reps) || 0;
           vol += w * r;
+          totalReps += r;
           const est = calculate1RM(w, r);
 
           if (w > maxW) {
@@ -141,6 +180,7 @@ export const AnalyticsView: React.FC = () => {
           estimated1RM: best1RM,
           totalVolume: vol,
           repsAtMax,
+          avgReps: Math.round((totalReps / ex.sets.length) * 10) / 10,
           notes: ex.exercise_notes,
         });
       }
@@ -440,7 +480,7 @@ export const AnalyticsView: React.FC = () => {
                     <span>Weight & Estimated 1RM (kg)</span>
                   </h3>
                   <p className="text-xs text-[#cbd5e1] font-medium">
-                    Peak working weight and Epley 1RM over time
+                    Peak working weight (dot size = reps/set) and Epley 1RM over time
                   </p>
                 </div>
                 <div className="h-72 sm:h-80 w-full">
@@ -478,7 +518,12 @@ export const AnalyticsView: React.FC = () => {
                           fontSize: '12px',
                           color: '#f1f5f9',
                         }}
-                        formatter={(value: any, name: any) => [`${value} kg`, name]}
+                        formatter={(value: any, name: any, item: any) => {
+                          if (name === 'Max Working Weight' && item?.payload) {
+                            return [`${value} kg (${item.payload.avgReps} avg reps/set)`, name];
+                          }
+                          return [`${value} kg`, name];
+                        }}
                         labelFormatter={(val: any) =>
                           val
                             ? new Date(Number(val)).toLocaleDateString(undefined, {
@@ -507,7 +552,8 @@ export const AnalyticsView: React.FC = () => {
                         stroke="#8fb89e"
                         strokeWidth={2}
                         strokeDasharray="4 4"
-                        dot={{ r: 3, fill: '#8fb89e', stroke: '#223541' }}
+                        dot={renderWorkingWeightDot}
+                        activeDot={renderWorkingWeightActiveDot}
                       />
                     </LineChart>
                   </ResponsiveContainer>
@@ -885,14 +931,18 @@ export const AnalyticsView: React.FC = () => {
                       fontSize: '12px',
                       color: '#f1f5f9',
                     }}
-                    formatter={(value: any, name: any) => [`${value} kg`, name]}
+                    formatter={(value: any, name: any, item: any) => {
+                      if (name === 'Max Working Weight' && item?.payload) {
+                        return [`${value} kg (${item.payload.avgReps} avg reps/set)`, name];
+                      }
+                      return [`${value} kg`, name];
+                    }}
                     labelStyle={{ color: '#cbd5e1', fontWeight: 'bold' }}
-                    labelFormatter={(val: any, payload: any) => {
-                      const range = payload?.[0]?.payload?.rawDate;
-                      if (range) return `2-Week Period: ${range}`;
+                    labelFormatter={(val: any) => {
                       if (!val) return '';
                       const d = new Date(Number(val));
                       return d.toLocaleDateString(undefined, {
+                        weekday: 'short',
                         month: 'short',
                         day: 'numeric',
                         year: 'numeric',
@@ -916,7 +966,8 @@ export const AnalyticsView: React.FC = () => {
                     stroke="#8fb89e"
                     strokeWidth={2}
                     strokeDasharray="4 4"
-                    dot={{ r: 3, fill: '#8fb89e', stroke: '#223541' }}
+                    dot={renderWorkingWeightDot}
+                    activeDot={renderWorkingWeightActiveDot}
                   />
                 </LineChart>
               </ResponsiveContainer>
