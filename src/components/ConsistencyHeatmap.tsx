@@ -7,6 +7,7 @@ interface ConsistencyHeatmapProps {
   title?: string;
   defaultRange?: '90d' | '180d' | '365d';
   className?: string;
+  filterExerciseName?: string;
 }
 
 interface HeatmapDayData {
@@ -33,6 +34,7 @@ export const ConsistencyHeatmap: React.FC<ConsistencyHeatmapProps> = ({
   title = 'Consistency Activity',
   defaultRange = '180d',
   className = '',
+  filterExerciseName,
 }) => {
   const { sessions, routines } = useWorkout();
   const [range, setRange] = useState<'90d' | '180d' | '365d'>(defaultRange);
@@ -51,11 +53,24 @@ export const ConsistencyHeatmap: React.FC<ConsistencyHeatmapProps> = ({
       }
     >();
 
+    const normalizedFilter = filterExerciseName?.trim().toLowerCase() || '';
+
     // 1. Map all completed workout sessions
     sessions.forEach((s) => {
       const sessionDate = s.completed_at || s.started_at;
       if (!sessionDate) return;
       const dateStr = toLocalISODate(new Date(sessionDate));
+
+      const matchingExercises = normalizedFilter
+        ? (s.logged_exercises || []).filter(
+            (le) => le.exercise_name?.trim().toLowerCase() === normalizedFilter
+          )
+        : s.logged_exercises || [];
+
+      if (normalizedFilter && matchingExercises.length === 0) {
+        return;
+      }
+
       const existing = map.get(dateStr) || {
         count: 0,
         setsCount: 0,
@@ -65,10 +80,12 @@ export const ConsistencyHeatmap: React.FC<ConsistencyHeatmapProps> = ({
 
       existing.count += 1;
 
-      (s.logged_exercises || []).forEach((le) => {
-        const baseName = getBaseExerciseName(le.exercise_name);
-        if (baseName && !existing.routines.includes(baseName)) {
-          existing.routines.push(baseName);
+      matchingExercises.forEach((le) => {
+        const displayName = normalizedFilter
+          ? le.exercise_name.trim()
+          : getBaseExerciseName(le.exercise_name);
+        if (displayName && !existing.routines.includes(displayName)) {
+          existing.routines.push(displayName);
         }
         (le.sets || []).forEach((st) => {
           existing.setsCount += 1;
@@ -76,30 +93,37 @@ export const ConsistencyHeatmap: React.FC<ConsistencyHeatmapProps> = ({
         });
       });
 
-      if (existing.routines.length === 0 && s.routine_name && !existing.routines.includes(s.routine_name)) {
+      if (
+        !normalizedFilter &&
+        existing.routines.length === 0 &&
+        s.routine_name &&
+        !existing.routines.includes(s.routine_name)
+      ) {
         existing.routines.push(s.routine_name);
       }
 
       map.set(dateStr, existing);
     });
 
-    // 2. Also map any routine marked completed on a date if not already recorded in a session
-    routines.forEach((r) => {
-      if (r.last_completed_at) {
-        const dateStr = toLocalISODate(new Date(r.last_completed_at));
-        if (!map.has(dateStr)) {
-          map.set(dateStr, {
-            count: 1,
-            setsCount: (r.exercises || []).reduce((acc, e) => acc + (e.target_sets || 3), 0),
-            volume: 0,
-            routines: [r.name],
-          });
+    // 2. Also map any routine marked completed on a date if not filtering to a single movement
+    if (!normalizedFilter) {
+      routines.forEach((r) => {
+        if (r.last_completed_at) {
+          const dateStr = toLocalISODate(new Date(r.last_completed_at));
+          if (!map.has(dateStr)) {
+            map.set(dateStr, {
+              count: 1,
+              setsCount: (r.exercises || []).reduce((acc, e) => acc + (e.target_sets || 3), 0),
+              volume: 0,
+              routines: [r.name],
+            });
+          }
         }
-      }
-    });
+      });
+    }
 
     return map;
-  }, [sessions, routines]);
+  }, [sessions, routines, filterExerciseName]);
 
   // Identify the earliest recorded workout date across all activity
   const earliestSessionDateStr = useMemo(() => {
