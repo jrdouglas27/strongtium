@@ -6,15 +6,55 @@ import {
   ChevronDown,
   ChevronUp,
   MessageSquareQuote,
+  Edit2,
+  Save,
+  X,
 } from 'lucide-react';
 import { useWorkout } from '../context/WorkoutContext';
 import { calculate1RM, formatDate, getBaseExerciseName } from '../lib/calculations';
 
 export const HistoryView: React.FC = () => {
-  const { sessions } = useWorkout();
+  const { sessions, updateLoggedExerciseSets } = useWorkout();
   const [expandedSessionId, setExpandedSessionId] = useState<string | null>(
     sessions[0]?.id || null
   );
+  const [editingExerciseId, setEditingExerciseId] = useState<string | null>(null);
+  const [editingSets, setEditingSets] = useState<
+    { id?: string; setNumber: number; weight: string; reps: string }[]
+  >([]);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  const handleStartEdit = (ex: any) => {
+    setEditingExerciseId(ex.id);
+    setEditingSets(
+      (ex.sets || []).map((s: any) => ({
+        id: s.id,
+        setNumber: s.set_number,
+        weight: String(s.weight ?? 0),
+        reps: String(s.reps ?? 0),
+      }))
+    );
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingExerciseId) return;
+    setIsSavingEdit(true);
+    try {
+      await updateLoggedExerciseSets(
+        editingExerciseId,
+        editingSets.map((s) => ({
+          id: s.id,
+          setNumber: s.setNumber,
+          weight: parseFloat(s.weight) || 0,
+          reps: parseInt(s.reps, 10) || 0,
+        }))
+      );
+      setEditingExerciseId(null);
+      setEditingSets([]);
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
 
   const completedSessions = sessions.filter((s) => s.completed_at);
 
@@ -126,49 +166,138 @@ export const HistoryView: React.FC = () => {
                     )}
 
                     <div className="space-y-3">
-                      {session.logged_exercises?.map((ex, exIdx) => (
-                        <div
-                          key={exIdx}
-                          className="bg-[#3d5a6c] border border-[#4e7085] rounded-xl p-3.5 space-y-2"
-                        >
-                          <div className="flex items-center justify-between">
-                            <h4 className="font-bold text-sm text-white flex items-center space-x-2">
-                              <Dumbbell className="w-3.5 h-3.5 text-[#8bb4cb]" />
-                              <span>{ex.exercise_name}</span>
-                            </h4>
-                          </div>
+                      {session.logged_exercises?.map((ex, exIdx) => {
+                        const isEditingEx = editingExerciseId === ex.id;
+                        return (
+                          <div
+                            key={exIdx}
+                            className="bg-[#3d5a6c] border border-[#4e7085] rounded-xl p-3.5 space-y-2"
+                          >
+                            <div className="flex items-center justify-between">
+                              <h4 className="font-bold text-sm text-white flex items-center space-x-2">
+                                <Dumbbell className="w-3.5 h-3.5 text-[#8bb4cb]" />
+                                <span>{ex.exercise_name}</span>
+                              </h4>
 
-                          {/* Sets grid */}
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
-                            {ex.sets.map((set, setIdx) => {
-                              const est1RM = calculate1RM(Number(set.weight), Number(set.reps));
-                              return (
-                                <div
-                                  key={setIdx}
-                                  className="bg-[#2d4554] border border-[#3f5d70] p-2 rounded-lg text-xs"
-                                >
-                                  <div className="text-[10px] text-[#94a3b8] font-bold mb-0.5">
-                                    Set {set.set_number}
-                                  </div>
-                                  <div className="font-mono font-bold text-white">
-                                    {set.weight}kg × {set.reps}
-                                  </div>
-                                  <div className="text-[10px] text-[#8bb4cb] font-mono mt-0.5 font-bold">
-                                    Est. 1RM: {est1RM}kg
-                                  </div>
+                              {isEditingEx ? (
+                                <div className="flex items-center space-x-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingExerciseId(null);
+                                      setEditingSets([]);
+                                    }}
+                                    className="text-[11px] font-bold text-[#cbd5e1] hover:text-white bg-[#2d4554] border border-[#3f5d70] px-2.5 py-1 rounded-lg flex items-center space-x-1 transition"
+                                  >
+                                    <X className="w-3 h-3" />
+                                    <span>Cancel</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={isSavingEdit}
+                                    onClick={handleSaveEdit}
+                                    className="text-[11px] font-extrabold text-[#0e2a18] bg-[#8fb89e] hover:bg-[#7ea98d] border border-[#78a387] px-2.5 py-1 rounded-lg flex items-center space-x-1 transition disabled:opacity-50"
+                                  >
+                                    <Save className="w-3 h-3" />
+                                    <span>{isSavingEdit ? 'Saving...' : 'Save'}</span>
+                                  </button>
                                 </div>
-                              );
-                            })}
-                          </div>
-
-                          {/* Exercise note if any */}
-                          {ex.exercise_notes && (
-                            <div className="text-[11px] text-[#332919] italic bg-[#c9bda9] px-2.5 py-1 rounded-md border border-[#b3a58e]">
-                              "{ex.exercise_notes}"
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartEdit(ex)}
+                                  className="text-[11px] font-bold text-[#8bb4cb] hover:text-white bg-[#2d4554] hover:bg-[#223541] border border-[#3f5d70] px-2.5 py-1 rounded-lg flex items-center space-x-1 transition"
+                                  title="Edit logged weights or reps"
+                                >
+                                  <Edit2 className="w-3 h-3" />
+                                  <span>Edit</span>
+                                </button>
+                              )}
                             </div>
-                          )}
-                        </div>
-                      ))}
+
+                            {/* Sets grid */}
+                            {isEditingEx ? (
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                                {editingSets.map((set, setIdx) => (
+                                  <div
+                                    key={setIdx}
+                                    className="bg-[#2d4554] border border-[#8bb4cb] p-2.5 rounded-lg text-xs space-y-1.5"
+                                  >
+                                    <div className="text-[10px] text-[#8bb4cb] font-bold">
+                                      Set {set.setNumber}
+                                    </div>
+                                    <div className="flex items-center space-x-1.5">
+                                      <div className="flex-1">
+                                        <span className="text-[9px] text-[#94a3b8] block mb-0.5">
+                                          Weight (kg)
+                                        </span>
+                                        <input
+                                          type="number"
+                                          step="0.5"
+                                          min={0}
+                                          value={set.weight}
+                                          onChange={(e) => {
+                                            const updated = [...editingSets];
+                                            updated[setIdx] = { ...updated[setIdx], weight: e.target.value };
+                                            setEditingSets(updated);
+                                          }}
+                                          className="w-full bg-[#3d5a6c] border border-[#4e7085] rounded px-2 py-1 text-xs font-mono font-bold text-white focus:outline-none focus:border-[#8bb4cb]"
+                                        />
+                                      </div>
+                                      <div className="flex-1">
+                                        <span className="text-[9px] text-[#94a3b8] block mb-0.5">
+                                          Reps
+                                        </span>
+                                        <input
+                                          type="number"
+                                          step="1"
+                                          min={0}
+                                          value={set.reps}
+                                          onChange={(e) => {
+                                            const updated = [...editingSets];
+                                            updated[setIdx] = { ...updated[setIdx], reps: e.target.value };
+                                            setEditingSets(updated);
+                                          }}
+                                          className="w-full bg-[#3d5a6c] border border-[#4e7085] rounded px-2 py-1 text-xs font-mono font-bold text-white focus:outline-none focus:border-[#8bb4cb]"
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                                {ex.sets.map((set, setIdx) => {
+                                  const est1RM = calculate1RM(Number(set.weight), Number(set.reps));
+                                  return (
+                                    <div
+                                      key={setIdx}
+                                      className="bg-[#2d4554] border border-[#3f5d70] p-2 rounded-lg text-xs"
+                                    >
+                                      <div className="text-[10px] text-[#94a3b8] font-bold mb-0.5">
+                                        Set {set.set_number}
+                                      </div>
+                                      <div className="font-mono font-bold text-white">
+                                        {set.weight}kg × {set.reps}
+                                      </div>
+                                      <div className="text-[10px] text-[#8bb4cb] font-mono mt-0.5 font-bold">
+                                        Est. 1RM: {est1RM}kg
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {/* Exercise note if any */}
+                            {ex.exercise_notes && (
+                              <div className="text-[11px] text-[#332919] italic bg-[#c9bda9] px-2.5 py-1 rounded-md border border-[#b3a58e]">
+                                "{ex.exercise_notes}"
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}

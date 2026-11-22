@@ -44,6 +44,10 @@ interface WorkoutContextType {
   personalRecords: Record<string, PersonalRecord>;
   loading: boolean;
   logExerciseSets: (payload: LogExercisePayload) => Promise<void>;
+  updateLoggedExerciseSets: (
+    loggedExerciseId: string,
+    sets: { id?: string; setNumber: number; weight: number; reps: number }[]
+  ) => Promise<void>;
   getExerciseHistory: (exerciseName: string) => ExerciseHistoryEntry[];
   getLastPerformance: (exerciseName: string) => LastExercisePerformance | null;
   getTodayLoggedSetsCount: (exerciseName?: string) => number;
@@ -1607,6 +1611,54 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
   }, [loading, bodyWeight, getEligibleBackfillTargets, backfillBodyWeightHistory]);
 
+  // Update individual sets of an existing logged exercise (used for inline editing in HistoryView)
+  const updateLoggedExerciseSets = useCallback(
+    async (
+      loggedExerciseId: string,
+      sets: { id?: string; setNumber: number; weight: number; reps: number }[]
+    ) => {
+      if (user) {
+        for (const s of sets) {
+          if (s.id) {
+            const { error } = await supabase
+              .from('logged_sets')
+              .update({
+                weight: Number(s.weight) || 0,
+                reps: Number(s.reps) || 0,
+              })
+              .eq('id', s.id);
+            if (error) throw error;
+          }
+        }
+        await fetchData();
+      } else {
+        setSessions((prev) => {
+          const updated = prev.map((sess) => ({
+            ...sess,
+            logged_exercises: (sess.logged_exercises || []).map((le) => {
+              if (le.id !== loggedExerciseId) return le;
+              return {
+                ...le,
+                sets: sets.map((s, idx) => ({
+                  ...(le.sets[idx] || {}),
+                  id: s.id || le.sets[idx]?.id || `local-${idx}`,
+                  logged_exercise_id: loggedExerciseId,
+                  set_number: s.setNumber,
+                  weight: Number(s.weight) || 0,
+                  reps: Number(s.reps) || 0,
+                })),
+              };
+            }),
+          }));
+          localStorage.setItem(LOCAL_STORAGE_SESSIONS, JSON.stringify(updated));
+          computePRs(updated);
+          return updated;
+        });
+      }
+    },
+    [user, computePRs]
+  );
+
   return (
     <WorkoutContext.Provider
       value={{
@@ -1615,6 +1667,7 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
         personalRecords,
         loading,
         logExerciseSets,
+        updateLoggedExerciseSets,
         getExerciseHistory,
         getLastPerformance,
         getTodayLoggedSetsCount,
