@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 import {
@@ -1593,6 +1593,19 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
       updatedSets,
     };
   }, [getEligibleBackfillTargets, bwBackfilledUntil, bwEnabledSince, user, computePRs]);
+
+  // Automatically backfill past +BW logs once bodyWeight > 0 and sessions are loaded
+  const isAutoBackfillingRef = useRef(false);
+  useEffect(() => {
+    if (loading || bodyWeight <= 0 || isAutoBackfillingRef.current) return;
+    const targets = getEligibleBackfillTargets();
+    if (targets.length === 0) return;
+
+    isAutoBackfillingRef.current = true;
+    backfillBodyWeightHistory().finally(() => {
+      isAutoBackfillingRef.current = false;
+    });
+  }, [loading, bodyWeight, getEligibleBackfillTargets, backfillBodyWeightHistory]);
 
   return (
     <WorkoutContext.Provider
